@@ -7,7 +7,7 @@ The Outsider’s Tax: Over 15,000 international and out-of-state students are fo
 
 The Inefficiency: There is a massive surplus of secure, climate-controlled square footage sitting empty in downtown Madison while students are struggling to find affordable space blocks away.
 
-# The Solution: "MaddaData" (Peer-to-Peer Storage)
+# The Solution:(Peer-to-Peer Storage)
 We’ve built a data-optimized marketplace that turns empty bedroom floor space into "Micro-Storage" units.
 
 Dynamic Pricing Engine: Our algorithm analyzes real-time commercial storage benchmarks and neighborhood rent data to suggest a "Sweet Spot" price—saving the storer 50% while offsetting the host’s rent by 15%.
