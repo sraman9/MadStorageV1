@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/scraped/*.json
+parser/data/scraped/*.json
+
+# Cursor / IDE / OS — don't push
+.cursorrules
+.cursor/
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo

@@ -1,0 +1,185 @@
+# All storage facilities in Madison area. Optional 'location' (city or zip) is for backend
+# geography filter so "saving $X vs local rates" uses same-market data.
+sources:
+  # --- Madison proper ---
+  - name: public_storage_madison
+    url: "https://www.publicstorage.com/self-storage-wi-madison"
+    adapter: public_storage
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: uhaul_madison
+    url: "https://www.uhaul.com/Locations/Self-Storage-near-Madison-WI/"
+    adapter: uhaul
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: extra_space_madison
+    url: "https://www.extraspace.com/storage/facilities/us/wisconsin/madison/"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: cubesmart_madison
+    url: "https://www.cubesmart.com/wisconsin-self-storage/madison-self-storage/"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  # Additional U-Haul locations in Madison (optional – more data points)
+  - name: uhaul_packers_ave
+    url: "https://www.uhaul.com/Locations/Self-Storage-near-Madison-WI-53704/"
+    adapter: uhaul
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: uhaul_east_madison
+    url: "https://www.uhaul.com/Locations/Self-Storage-near-Madison-WI-53714/"
+    adapter: uhaul
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: uhaul_verona_road
+    url: "https://www.uhaul.com/Locations/Self-Storage-near-Madison-WI-53711/"
+    adapter: uhaul
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  # More Madison-area chains
+  - name: storquest_madison
+    url: "https://www.storquest.com/self-storage/wi/madison/9100/unit-sizes-prices"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: ko_storage_madison
+    url: "https://www.kostorage.com/storage-locations/wisconsin/madison/"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: security_self_storage_madison
+    url: "https://www.storagemadison.com/"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: storsafe_madison
+    url: "https://www.storsafe.com/locations/madison-wi-53704"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: superior_storage_madison
+    url: "https://www.superiorstorage.com/self-storage/wisconsin/madison/superior-storage-madison/"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: beltline_self_storage_madison
+    url: "https://www.madison-self-storage.com/"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: madison_verona_self_storage
+    url: "https://www.madisonveronaselfstorage.com/"
+    adapter: playwright_generic
+    location: "Madison"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  # --- Fitchburg (Madison area) ---
+  - name: cubesmart_fitchburg
+    url: "https://www.cubesmart.com/wisconsin-self-storage/fitchburg-self-storage/"
+    adapter: playwright_generic
+    location: "Fitchburg"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: fitchburg_self_storage
+    url: "https://www.fitchburgselfstorage.com/"
+    adapter: playwright_generic
+    location: "Fitchburg"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  # --- Middleton ---
+  - name: extra_space_middleton
+    url: "https://www.extraspace.com/storage/facilities/us/wisconsin/middleton/"
+    adapter: playwright_generic
+    location: "Middleton"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: uhaul_middleton
+    url: "https://www.uhaul.com/Locations/Self-Storage-near-Middleton-WI/"
+    adapter: uhaul
+    location: "Middleton"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  # --- Verona ---
+  - name: extra_space_verona
+    url: "https://www.extraspace.com/storage/facilities/us/wisconsin/verona/"
+    adapter: playwright_generic
+    location: "Verona"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: verona_self_storage
+    url: "https://www.veronaselfstorage.com/"
+    adapter: playwright_generic
+    location: "Verona"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  # --- Sun Prairie ---
+  - name: aa_linnerud_sun_prairie
+    url: "https://linnerudstorage.com/"
+    adapter: playwright_generic
+    location: "Sun Prairie"
+    target_sizes:
+      - "5x5"
+      - "10x10"
+
+  - name: first_choice_storage_sun_prairie
+    url: "https://www.firstchoicestoragewi.com/"
+    adapter: playwright_generic
+    location: "Sun Prairie"
+    target_sizes:
+      - "5x5"
+      - "10x10"

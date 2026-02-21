@@ -39,3 +39,23 @@ npm run build
 - `src/components/StorageRequestCard.tsx` - Individual storage request card component
 - `src/index.css` - Global styles with Tailwind CSS v4 configuration
 - `src/main.tsx` - Application entry point
+
+---
+
+## Storage rate parser (data pipeline)
+
+The **parser** fetches commercial storage prices (unit size + monthly rate) from Madison-area sites so the app can show "You're saving $X" vs local rates.
+
+- **Docs and commands:** See **[parser/README.md](parser/README.md)** for setup, run, and analyze.
+- **Backend contract:** See **parser/docs/SCRAPER_FOR_BACKEND.md** for JSON schema and how to ingest.
+
+**Quick run (from repo root):**
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+python parser/scripts/run_scraper.py --max-sources 3
+python parser/scripts/analyze_rates.py
+```
+
+Repo layout: `parser/` contains the scraper (config, scripts, docs); app code lives in the repo root or its usual locations.
