@@ -1,7 +1,7 @@
 # The Problem: The "Summer Storage Gap"
 # UW-Madison students face a dual financial crisis every summer:
 
-# The Renter’s Loss: Local students with 12-month leases leave their apartments empty for 3 months, effectively "throwing away" an average of $3,800 in unutilized rent.
+ The Renter’s Loss: Local students with 12-month leases leave their apartments empty for 3 months, effectively "throwing away" an average of $3,800 in unutilized rent.
 
 The Outsider’s Tax: Over 15,000 international and out-of-state students are forced to pay predatory seasonal rates (averaging $120+/month) at remote commercial storage facilities, plus the high cost of truck rentals and Uber trips to the outskirts of Madison.
 
