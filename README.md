@@ -1,6 +1,7 @@
 # The Problem: The "Summer Storage Gap"
 # UW-Madison students face a dual financial crisis every summer:
 
+Storage Scholars is on average $172 per month, for a minimum of 4 months. 
  The Renter’s Loss: Local students with 12-month leases leave their apartments empty for 3 months, effectively "throwing away" an average of $3,800 in unutilized rent.
 
 The Outsider’s Tax: Over 15,000 international and out-of-state students are forced to pay predatory seasonal rates (averaging $120+/month) at remote commercial storage facilities, plus the high cost of truck rentals and Uber trips to the outskirts of Madison.
@@ -19,4 +20,3 @@ Logistics Optimization: By using Geospatial Data, we match students with hosts w
 # The "Value Add" for MadData Judges
 "We aren't just matching people; we are using data to quantify and solve a $10M+ annual inefficiency in the Madison student housing market."
 
-Would you like me to help you turn this into a 1-minute "Elevator Pitch" script for your final presentation?
