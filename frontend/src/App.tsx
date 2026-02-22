@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import StorageRequestCard from './components/StorageRequestCard';
 import StorageSpaceCard from './components/StorageSpaceCard';
 import { supabase } from './lib/supabase';
@@ -6,6 +6,7 @@ import logo from './assets/logo.png';
 
 
 interface StorageRequest {
+  userId?: string;
   name: string;
   profileImage: string;
   neighborhood: string;
@@ -16,6 +17,7 @@ interface StorageRequest {
 }
 
 interface StorageSpace {
+  userId?: string;
   name: string;
   profileImage: string;
   neighborhood: string;
@@ -190,19 +192,49 @@ function AuthCard({ onSuccess }: { onSuccess: () => void }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
-  const [user, setUser] = useState<{ id: string } | null>(null);
-  const [viewMode, setViewMode] = useState<'home' | 'requests' | 'space'>('home');
+  const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: { full_name?: string } } | null>(null);
+  const [viewMode, setViewMode] = useState<'home' | 'requests' | 'space' | 'profile'>('home');
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<'request' | 'space'>('request');
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [profileName, setProfileName] = useState('');
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [authToast, setAuthToast] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [profilePhone, setProfilePhone] = useState('');
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState('');
+  const [profileAvatarFile, setProfileAvatarFile] = useState<File | null>(null);
+  const [profileAvatarPreview, setProfileAvatarPreview] = useState('');
+  const [contactPopup, setContactPopup] = useState<{ name: string; avatarUrl: string; phone: string; email: string } | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const profileAvatarInputRef = useRef<HTMLInputElement>(null);
 
   const [requests, setRequests] = useState<StorageRequest[]>([]);
   const [spaces, setSpaces] = useState<StorageSpace[]>([]);
 
-  // --- Auth state: listen for sign in/out ──────────────────────────────────────
+  const loadProfile = async (u: { id: string; email?: string; user_metadata?: { full_name?: string } }) => {
+    setProfileName(u.user_metadata?.full_name || '');
+    const { data: profile } = await supabase.from('profiles').select('*').eq('id', u.id).single();
+    if (profile) {
+      setProfileAvatarUrl(profile.avatar_url || '');
+      setProfilePhone(profile.phone || '');
+      setProfileName(profile.full_name || u.user_metadata?.full_name || '');
+    } else {
+      setShowOnboarding(true);
+    }
+  };
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) loadProfile(u);
+    });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
+      if (u) loadProfile(u);
+      else { setProfileAvatarUrl(''); setProfilePhone(''); }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -221,7 +253,68 @@ function App() {
     price: "",
   });
 
+  const uploadAvatar = async (file: File, userId: string): Promise<string> => {
+    const ext = file.name.split('.').pop();
+    const path = `${userId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('avatars').upload(path, file);
+    if (error) throw error;
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    return data.publicUrl;
+  };
+
+  const handleAvatarSelect = (file: File | undefined) => {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      alert('Only JPEG and PNG files are accepted.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File must be under 10MB.');
+      return;
+    }
+    setProfileAvatarFile(file);
+    setProfileAvatarPreview(URL.createObjectURL(file));
+  };
+
+  const handleOnboardingSubmit = async () => {
+    if (!user) return;
+    if (!profileAvatarFile) { alert('Please upload a profile picture.'); return; }
+    if (!profilePhone.trim()) { alert('Please enter your phone number.'); return; }
+    try {
+      const avatarUrl = await uploadAvatar(profileAvatarFile, user.id);
+      const { error } = await supabase.from('profiles').upsert({
+        id: user.id,
+        full_name: profileName,
+        avatar_url: avatarUrl,
+        phone: profilePhone.trim(),
+        email: user.email || '',
+      });
+      if (error) throw error;
+      setProfileAvatarUrl(avatarUrl);
+      setProfileAvatarPreview('');
+      setProfileAvatarFile(null);
+      setShowOnboarding(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save profile.');
+    }
+  };
+
+  const handleContact = async (userId: string) => {
+    try {
+      const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      setContactPopup({
+        name: data?.full_name || 'Student',
+        avatarUrl: data?.avatar_url || '',
+        phone: data?.phone || 'Not provided',
+        email: data?.email || 'Not provided',
+      });
+    } catch {
+      setContactPopup({ name: 'Student', avatarUrl: '', phone: 'Not provided', email: 'Not provided' });
+    }
+  };
+
   const mapSupabaseRequest = (r: Record<string, unknown>): StorageRequest => ({
+    userId: (r.user_id as string) || undefined,
     name: (r.name as string) || 'Student',
     profileImage: (r.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
     neighborhood: (r.neighborhood as string) || '',
@@ -235,6 +328,7 @@ function App() {
     const items = s.items;
     const capacity = typeof items === 'string' ? (items ? (items as string).split(',').map((x: string) => x.trim()).filter(Boolean) : []) : (Array.isArray(s.capacity) ? s.capacity : []);
     return {
+      userId: (s.user_id as string) || undefined,
       name: (s.name as string) || 'Host',
       profileImage: (s.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
       neighborhood: (s.neighborhood as string) || '',
@@ -288,8 +382,8 @@ function App() {
       if (modalType === 'request') {
         const { data, error } = await supabase.from('storage_requests').insert({
           user_id: user.id,
-          name: formData.name,
-          profile_image: formData.profileImage,
+          name: profileName || formData.name,
+          profile_image: profileAvatarUrl || formData.profileImage,
           neighborhood: formData.neighborhood || 'Madison',
           items: formData.items,
           budget: formData.budget,
@@ -302,8 +396,8 @@ function App() {
         const capacity = formData.items ? formData.items.split(',').map((s) => s.trim()).filter(Boolean) : [];
         const { data, error } = await supabase.from('storage_spaces').insert({
           user_id: user.id,
-          name: formData.name,
-          profile_image: formData.profileImage,
+          name: profileName || formData.name,
+          profile_image: profileAvatarUrl || formData.profileImage,
           neighborhood: formData.neighborhood || 'Madison',
           space_image: formData.spaceImage,
           space_type: formData.spaceType || 'Other',
@@ -376,7 +470,10 @@ function App() {
             {(['requests', 'space'] as const).map((mode) => (
               <button
                 key={mode}
-                onClick={() => setViewMode(mode)}
+                onClick={() => {
+                  if (user) { setViewMode(mode); }
+                  else { setAuthToast(true); setTimeout(() => setAuthToast(false), 2500); }
+                }}
                 style={{
                   padding: '8px 16px', borderRadius: '100px', border: 'none',
                   background: viewMode === mode ? '#C5050C' : 'transparent',
@@ -392,8 +489,8 @@ function App() {
             ))}
           </div>
 
-          {/* CTA + Sign Out */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          {/* CTA + Profile */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
             <button
               onClick={() => openModal(viewMode === 'space' ? 'space' : 'request')}
               style={{
@@ -406,18 +503,86 @@ function App() {
               onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
             >
               <span style={{ fontSize: '16px', lineHeight: 1 }}>+</span>
-              {viewMode === 'space' ? 'List Your Space' : 'Create Storage Request'}
+              {viewMode === 'space' ? 'List Space' : 'Add Request'}
             </button>
+
             {user && (
-              <button
-                onClick={async () => await supabase.auth.signOut()}
-                style={{
-                  background: 'transparent', color: '#6b7280', border: '1px solid #e5e7eb',
-                  borderRadius: '10px', padding: '8px 12px', fontSize: '12px', cursor: 'pointer', fontFamily: FONT,
-                }}
-              >
-                Sign Out
-              </button>
+              <div style={{ position: 'relative' }}>
+                {profileAvatarUrl ? (
+                  <img
+                    onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                    src={profileAvatarUrl}
+                    alt="Profile"
+                    style={{
+                      width: '36px', height: '36px', borderRadius: '50%', border: '2px solid #e5e7eb',
+                      objectFit: 'cover', cursor: 'pointer', transition: 'border-color 0.15s ease',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = '#C5050C')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+                  />
+                ) : (
+                  <button
+                    onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                    style={{
+                      width: '36px', height: '36px', borderRadius: '50%', border: '2px solid #e5e7eb',
+                      background: '#C5050C', color: '#fff', cursor: 'pointer', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: '700',
+                      fontFamily: FONT, padding: 0, transition: 'border-color 0.15s ease',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = '#C5050C')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+                  >
+                    {(profileName || user.email || 'U').charAt(0).toUpperCase()}
+                  </button>
+                )}
+                {showProfileDropdown && (
+                  <>
+                    <div
+                      onClick={() => setShowProfileDropdown(false)}
+                      style={{ position: 'fixed', inset: 0, zIndex: 199 }}
+                    />
+                    <div style={{
+                      position: 'absolute', right: 0, top: '44px', background: '#fff',
+                      borderRadius: '12px', border: '1px solid #e5e7eb',
+                      boxShadow: '0 8px 30px rgba(0,0,0,0.12)', minWidth: '200px',
+                      zIndex: 200, overflow: 'hidden',
+                    }}>
+                      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6' }}>
+                        <div style={{ fontWeight: '700', fontSize: '13px', color: '#111827', fontFamily: FONT }}>
+                          {profileName || 'Badger'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#9ca3af', fontFamily: FONT, marginTop: '2px' }}>
+                          {user.email || ''}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => { setShowProfileDropdown(false); setViewMode('profile'); }}
+                        style={{
+                          width: '100%', padding: '10px 16px', background: 'none', border: 'none',
+                          textAlign: 'left', cursor: 'pointer', fontSize: '13px', color: '#111827',
+                          fontFamily: FONT, fontWeight: '500',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        Profile Settings
+                      </button>
+                      <button
+                        onClick={async () => { setShowProfileDropdown(false); await supabase.auth.signOut(); setViewMode('home'); }}
+                        style={{
+                          width: '100%', padding: '10px 16px', background: 'none', border: 'none',
+                          borderTop: '1px solid #f3f4f6', textAlign: 'left', cursor: 'pointer',
+                          fontSize: '13px', color: '#C5050C', fontFamily: FONT, fontWeight: '500',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#fff1f1')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        Sign Out
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -460,15 +625,6 @@ function App() {
                 >
                   View Storage Spaces
                 </button>
-                <button
-                  onClick={async () => { await supabase.auth.signOut(); }}
-                  style={{
-                    background: 'transparent', color: '#6b7280', border: '1px solid #e5e7eb',
-                    borderRadius: '12px', padding: '14px 20px', fontSize: '14px', cursor: 'pointer', fontFamily: FONT,
-                  }}
-                >
-                  Sign Out
-                </button>
               </div>
             ) : (
               <AuthCard onSuccess={() => setViewMode('requests')} />
@@ -478,36 +634,193 @@ function App() {
 
         {/* STORAGE REQUESTS */}
         {viewMode === 'requests' && (
-          <>
-            <div style={{ marginBottom: '24px' }}>
-              <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827' }}>Storage Requests Near You</h2>
-              <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
-                {requests.length} students looking for storage right now
-              </p>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
+          user ? (
+            <>
+              <div style={{ marginBottom: '24px' }}>
+                <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827' }}>Storage Requests Near You</h2>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
+                  {requests.length} students looking for storage right now
+                </p>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
               {requests.map((request, index) => (
-                <StorageRequestCard key={index} {...request} />
+                <StorageRequestCard key={index} {...request} onContact={handleContact} />
               ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0' }}>
+              <h2 style={{ fontSize: '24px', fontWeight: '800', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                Sign in to view requests
+              </h2>
+              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px', fontFamily: FONT }}>
+                You need a UW-Madison account to browse storage requests.
+              </p>
+              <AuthCard onSuccess={() => setViewMode('requests')} />
             </div>
-          </>
+          )
+        )}
+
+        {/* PROFILE */}
+        {viewMode === 'profile' && user && (
+          <div style={{ maxWidth: '520px', margin: '0 auto', padding: '40px 0' }}>
+            <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827', marginBottom: '24px', fontFamily: FONT }}>
+              Profile Settings
+            </h2>
+            <div style={{
+              background: '#fff', borderRadius: '16px', border: '1px solid #e5e7eb',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)', padding: '28px',
+            }}>
+              {/* Avatar */}
+              <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div
+                  onClick={() => profileAvatarInputRef.current?.click()}
+                  style={{
+                    width: '72px', height: '72px', borderRadius: '50%', flexShrink: 0,
+                    border: '2px dashed #e5e7eb', cursor: 'pointer', overflow: 'hidden',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: '#f9fafb', position: 'relative',
+                  }}
+                >
+                  {(profileAvatarPreview || profileAvatarUrl) ? (
+                    <img src={profileAvatarPreview || profileAvatarUrl} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <span style={{ fontSize: '28px', color: '#d1d5db' }}>+</span>
+                  )}
+                </div>
+                <input ref={profileAvatarInputRef} type="file" accept="image/jpeg,image/png"
+                  style={{ display: 'none' }}
+                  onChange={e => { handleAvatarSelect(e.target.files?.[0]); setProfileSaved(false); }}
+                />
+                <div>
+                  <div style={{ fontWeight: '600', fontSize: '14px', color: '#111827', fontFamily: FONT }}>Profile Picture</div>
+                  <div
+                    onClick={() => profileAvatarInputRef.current?.click()}
+                    style={{ fontSize: '13px', color: '#C5050C', cursor: 'pointer', fontFamily: FONT, marginTop: '2px' }}
+                  >
+                    Change photo
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#9ca3af', fontFamily: FONT, marginTop: '2px' }}>JPEG or PNG only</div>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                  Display Name
+                </label>
+                <input
+                  value={profileName}
+                  onChange={(e) => { setProfileName(e.target.value); setProfileSaved(false); }}
+                  placeholder="Your name"
+                  style={{
+                    width: '100%', padding: '12px 14px', borderRadius: '10px',
+                    border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                  Phone Number
+                </label>
+                <input
+                  value={profilePhone}
+                  onChange={(e) => { setProfilePhone(e.target.value); setProfileSaved(false); }}
+                  placeholder="(608) 555-1234"
+                  style={{
+                    width: '100%', padding: '12px 14px', borderRadius: '10px',
+                    border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                  Email
+                </label>
+                <input
+                  value={user.email || ''}
+                  disabled
+                  style={{
+                    width: '100%', padding: '12px 14px', borderRadius: '10px',
+                    border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#9ca3af',
+                    background: '#f9fafb', outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <button
+                onClick={async () => {
+                  try {
+                    let avatarUrl = profileAvatarUrl;
+                    if (profileAvatarFile) {
+                      avatarUrl = await uploadAvatar(profileAvatarFile, user.id);
+                    }
+                    const { error } = await supabase.from('profiles').upsert({
+                      id: user.id,
+                      full_name: profileName,
+                      avatar_url: avatarUrl,
+                      phone: profilePhone.trim(),
+                      email: user.email || '',
+                    });
+                    if (error) throw error;
+                    await supabase.auth.updateUser({ data: { full_name: profileName } });
+                    setProfileAvatarUrl(avatarUrl);
+                    setProfileAvatarFile(null);
+                    setProfileAvatarPreview('');
+                    setProfileSaved(true);
+                  } catch (err) {
+                    alert(err instanceof Error ? err.message : 'Failed to save.');
+                  }
+                }}
+                style={{
+                  background: '#C5050C', color: '#fff', border: 'none', borderRadius: '10px',
+                  padding: '12px 24px', fontWeight: '700', fontSize: '14px', cursor: 'pointer',
+                  fontFamily: FONT, transition: 'background 0.15s ease',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+                onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+              >
+                Save Changes
+              </button>
+              {profileSaved && (
+                <span style={{ marginLeft: '12px', fontSize: '13px', color: '#16a34a', fontFamily: FONT }}>
+                  Saved!
+                </span>
+              )}
+            </div>
+          </div>
         )}
 
         {/* STORAGE SPACES */}
         {viewMode === 'space' && (
-          <>
-            <div style={{ marginBottom: '24px' }}>
-              <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827' }}>Storage Spaces Near You</h2>
-              <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
-                {spaces.length} spaces available from fellow Badgers
-              </p>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
+          user ? (
+            <>
+              <div style={{ marginBottom: '24px' }}>
+                <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827' }}>Storage Spaces Near You</h2>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
+                  {spaces.length} spaces available from fellow Badgers
+                </p>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
               {spaces.map((space, index) => (
-                <StorageSpaceCard key={index} {...space} />
+                <StorageSpaceCard key={index} {...space} onContact={handleContact} />
               ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0' }}>
+              <h2 style={{ fontSize: '24px', fontWeight: '800', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                Sign in to view spaces
+              </h2>
+              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px', fontFamily: FONT }}>
+                You need a UW-Madison account to browse storage spaces.
+              </p>
+              <AuthCard onSuccess={() => setViewMode('space')} />
             </div>
-          </>
+          )
         )}
       </main>
 
@@ -691,6 +1004,200 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Onboarding Modal */}
+      {showOnboarding && user && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '20px',
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: '20px', padding: '32px',
+            width: '100%', maxWidth: '440px', boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+          }}>
+            <h2 style={{ fontWeight: '800', fontSize: '20px', color: '#111827', fontFamily: FONT, marginBottom: '4px' }}>
+              Complete Your Profile
+            </h2>
+            <p style={{ fontSize: '13px', color: '#6b7280', fontFamily: FONT, marginBottom: '24px' }}>
+              Add a photo and contact info so other students can reach you.
+            </p>
+
+            {/* Avatar upload */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '24px' }}>
+              <div
+                onClick={() => avatarInputRef.current?.click()}
+                style={{
+                  width: '96px', height: '96px', borderRadius: '50%',
+                  border: profileAvatarPreview ? 'none' : '2px dashed #d1d5db',
+                  cursor: 'pointer', overflow: 'hidden', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', background: '#f9fafb',
+                }}
+              >
+                {profileAvatarPreview ? (
+                  <img src={profileAvatarPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '28px', marginBottom: '2px' }}>📷</div>
+                    <div style={{ fontSize: '10px', color: '#9ca3af', fontFamily: FONT }}>Upload</div>
+                  </div>
+                )}
+              </div>
+              <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png"
+                style={{ display: 'none' }}
+                onChange={e => handleAvatarSelect(e.target.files?.[0])}
+              />
+              <div style={{ fontSize: '11px', color: '#9ca3af', fontFamily: FONT, marginTop: '8px' }}>
+                JPEG or PNG only, up to 10MB
+              </div>
+            </div>
+
+            {/* Phone */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                Phone Number
+              </label>
+              <input
+                value={profilePhone}
+                onChange={e => setProfilePhone(e.target.value)}
+                placeholder="(608) 555-1234"
+                style={{
+                  width: '100%', padding: '12px 14px', borderRadius: '10px',
+                  border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {/* Name (pre-filled from signup) */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                Display Name
+              </label>
+              <input
+                value={profileName}
+                onChange={e => setProfileName(e.target.value)}
+                placeholder="Your name"
+                style={{
+                  width: '100%', padding: '12px 14px', borderRadius: '10px',
+                  border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            <button
+              onClick={handleOnboardingSubmit}
+              style={{
+                width: '100%', background: '#C5050C', color: '#fff', border: 'none',
+                borderRadius: '12px', padding: '14px', fontSize: '15px', fontWeight: '700',
+                cursor: 'pointer', fontFamily: FONT, transition: 'background 0.15s ease',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+            >
+              Save & Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Contact Popup */}
+      {contactPopup && (
+        <div
+          onClick={() => setContactPopup(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: '20px',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: '20px', padding: '32px',
+              width: '100%', maxWidth: '360px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+              textAlign: 'center',
+            }}
+          >
+            <button
+              onClick={() => setContactPopup(null)}
+              style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#9ca3af' }}
+            >
+              ✕
+            </button>
+
+            {/* Avatar */}
+            <div style={{
+              width: '88px', height: '88px', borderRadius: '50%', margin: '0 auto 16px',
+              overflow: 'hidden', border: '3px solid #f3f4f6', background: '#f9fafb',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {contactPopup.avatarUrl ? (
+                <img src={contactPopup.avatarUrl} alt={contactPopup.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <span style={{ fontSize: '32px', fontWeight: '700', color: '#C5050C', fontFamily: FONT }}>
+                  {contactPopup.name.charAt(0).toUpperCase()}
+                </span>
+              )}
+            </div>
+
+            <h3 style={{ fontWeight: '800', fontSize: '18px', color: '#111827', fontFamily: FONT, marginBottom: '16px' }}>
+              {contactPopup.name}
+            </h3>
+
+            {/* Contact rows */}
+            <div style={{ textAlign: 'left' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
+                background: '#f9fafb', borderRadius: '10px', marginBottom: '8px',
+              }}>
+                <span style={{ fontSize: '18px' }}>📧</span>
+                <div>
+                  <div style={{ fontSize: '10px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: FONT }}>Email</div>
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', fontFamily: FONT }}>{contactPopup.email}</div>
+                </div>
+              </div>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
+                background: '#f9fafb', borderRadius: '10px',
+              }}>
+                <span style={{ fontSize: '18px' }}>📱</span>
+                <div>
+                  <div style={{ fontSize: '10px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: FONT }}>Phone</div>
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', fontFamily: FONT }}>{contactPopup.phone}</div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setContactPopup(null)}
+              style={{
+                width: '100%', marginTop: '20px', background: '#C5050C', color: '#fff', border: 'none',
+                borderRadius: '10px', padding: '12px', fontSize: '14px', fontWeight: '700',
+                cursor: 'pointer', fontFamily: FONT, transition: 'background 0.15s ease',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Auth toast */}
+      {authToast && (
+        <div style={{
+          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          background: '#111827', color: '#fff', padding: '12px 24px', borderRadius: '12px',
+          fontSize: '14px', fontWeight: '600', fontFamily: FONT, zIndex: 2000,
+          boxShadow: '0 8px 30px rgba(0,0,0,0.2)', display: 'flex', alignItems: 'center', gap: '8px',
+          animation: 'fadeInUp 0.25s ease',
+        }}>
+          <span style={{ fontSize: '16px' }}>🔒</span>
+          Please sign in to access this page.
+        </div>
+      )}
+      <style>{`@keyframes fadeInUp { from { opacity:0; transform:translateX(-50%) translateY(12px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }`}</style>
     </div>
   );
 }

@@ -49,3 +49,23 @@ create policy "Auth update requests" on storage_requests for update using (auth.
 create policy "Auth update spaces" on storage_spaces for update using (auth.uid() = user_id);
 create policy "Auth delete requests" on storage_requests for delete using (auth.uid() = user_id);
 create policy "Auth delete spaces" on storage_spaces for delete using (auth.uid() = user_id);
+
+-- User profiles (contact info + avatar)
+create table if not exists profiles (
+  id uuid references auth.users(id) on delete cascade primary key,
+  full_name text,
+  avatar_url text,
+  phone text,
+  email text,
+  updated_at timestamptz default now()
+);
+
+alter table profiles enable row level security;
+create policy "Public read profiles" on profiles for select using (true);
+create policy "Users insert own profile" on profiles for insert with check (auth.uid() = id);
+create policy "Users update own profile" on profiles for update using (auth.uid() = id);
+
+-- IMPORTANT: Also create a Supabase Storage bucket for profile pictures:
+-- 1. Go to Supabase Dashboard → Storage → New Bucket
+-- 2. Name: "avatars", Public: ON → Create
+-- 3. Under Policies, add: Allow authenticated uploads (INSERT) and public reads (SELECT)

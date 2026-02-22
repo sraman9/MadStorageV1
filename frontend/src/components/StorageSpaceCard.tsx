@@ -1,22 +1,25 @@
 import React, { useState } from 'react';
 
 interface StorageSpaceCardProps {
+  userId?: string;
   name: string;
   profileImage: string;
   neighborhood: string;
   spaceImage: string;
-  spaceType: string; // e.g. "Basement", "Garage", "Spare Room"
-  capacity: string[]; // e.g. ["5-6 boxes", "1 mini fridge", "2 suitcases"]
+  spaceType: string;
+  capacity: string[];
   timeframe: string;
   description?: string;
   price?: number | null;
   marketAvg?: number;
   savings?: number | null;
+  onContact?: (userId: string) => void;
 }
 
 const FONT = "'DM Sans', system-ui, sans-serif";
 
 const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
+  userId,
   name,
   profileImage,
   neighborhood,
@@ -28,6 +31,7 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
   price,
   marketAvg,
   savings,
+  onContact,
 }) => {
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
@@ -241,6 +245,7 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
         <button
           onMouseEnter={() => setBtnHovered(true)}
           onMouseLeave={() => setBtnHovered(false)}
+          onClick={() => userId && onContact?.(userId)}
           style={{
             width: '100%',
             background: btnHovered ? '#a0040a' : '#C5050C',
