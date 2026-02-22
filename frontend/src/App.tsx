@@ -6,6 +6,7 @@ import logo from './assets/logo.png';
 
 
 interface StorageRequest {
+  id?: string;
   userId?: string;
   name: string;
   profileImage: string;
@@ -14,6 +15,29 @@ interface StorageRequest {
   budget: string;
   timeframe: string;
   description: string;
+}
+
+interface Match {
+  id: string;
+  spaceId: string;
+  requestId?: string;
+  requesterId: string;
+  hostId: string;
+  status: 'requested' | 'active' | 'completed' | 'declined';
+  requesterDone: boolean;
+  hostDone: boolean;
+  createdAt: string;
+  spaceName?: string;
+  spaceImage?: string;
+  spaceNeighborhood?: string;
+  spaceType?: string;
+  requesterName?: string;
+  requesterAvatar?: string;
+  hostName?: string;
+  hostAvatar?: string;
+  requestItems?: string;
+  requestBudget?: string;
+  spacePrice?: number;
 }
 
 interface StorageSpace {
@@ -217,7 +241,7 @@ function AuthCard({ onSuccess }: { onSuccess: () => void }) {
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
   const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: { full_name?: string } } | null>(null);
-  const [viewMode, setViewMode] = useState<'home' | 'requests' | 'space' | 'profile'>('home');
+  const [viewMode, setViewMode] = useState<'home' | 'requests' | 'space' | 'profile' | 'history'>('home');
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<'request' | 'space'>('request');
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
@@ -241,6 +265,8 @@ function App() {
 
   const [requests, setRequests] = useState<StorageRequest[]>([]);
   const [spaces, setSpaces] = useState<StorageSpace[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [historyDetail, setHistoryDetail] = useState<Match | null>(null);
   const [profileReviews, setProfileReviews] = useState<{ score: number; comment: string; reviewerName: string; reviewerAvatar: string; createdAt: string }[]>([]);
   const [profileAvgRating, setProfileAvgRating] = useState<number | null>(null);
 
@@ -260,13 +286,13 @@ function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const u = session?.user ?? null;
       setUser(u);
-      if (u) loadProfile(u);
+      if (u) { loadProfile(u); loadMatches(u.id); }
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
       const u = session?.user ?? null;
       setUser(u);
-      if (u) loadProfile(u);
-      else { setProfileAvatarUrl(''); setProfilePhone(''); }
+      if (u) { loadProfile(u); loadMatches(u.id); }
+      else { setProfileAvatarUrl(''); setProfilePhone(''); setMatches([]); }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -362,6 +388,197 @@ function App() {
       setProfileReviews([]);
       setProfileAvgRating(null);
     }
+  };
+
+  const mapMatch = (m: Record<string, unknown>): Match => ({
+    id: m.id as string,
+    spaceId: m.space_id as string,
+    requestId: (m.request_id as string) || undefined,
+    requesterId: m.requester_id as string,
+    hostId: m.host_id as string,
+    status: m.status as Match['status'],
+    requesterDone: m.requester_done as boolean,
+    hostDone: m.host_done as boolean,
+    createdAt: m.created_at as string,
+  });
+
+  const enrichMatch = async (match: Match): Promise<Match> => {
+    try {
+      const spaceRes = await supabase.from('storage_spaces').select('name, space_image, neighborhood, space_type, price').eq('id', match.spaceId).maybeSingle();
+      const reqRes = await supabase.from('profiles').select('full_name, avatar_url').eq('id', match.requesterId).maybeSingle();
+      const hostRes = await supabase.from('profiles').select('full_name, avatar_url').eq('id', match.hostId).maybeSingle();
+      let requestItems = '';
+      let requestBudget = '';
+      if (match.requestId) {
+        const reqDataRes = await supabase.from('storage_requests').select('items, budget').eq('id', match.requestId).maybeSingle();
+        if (reqDataRes.data) { requestItems = reqDataRes.data.items || ''; requestBudget = reqDataRes.data.budget || ''; }
+      }
+      return {
+        ...match,
+        spaceName: spaceRes.data?.name || 'Space',
+        spaceImage: spaceRes.data?.space_image || '',
+        spaceNeighborhood: spaceRes.data?.neighborhood || '',
+        spaceType: spaceRes.data?.space_type || '',
+        spacePrice: spaceRes.data?.price != null ? Number(spaceRes.data.price) : undefined,
+        requesterName: reqRes.data?.full_name || 'Student',
+        requesterAvatar: reqRes.data?.avatar_url || '',
+        hostName: hostRes.data?.full_name || 'Host',
+        hostAvatar: hostRes.data?.avatar_url || '',
+        requestItems,
+        requestBudget,
+      };
+    } catch {
+      return match;
+    }
+  };
+
+  const loadMatches = async (userId: string) => {
+    let raw: Match[] = [];
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/matches/user/${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        raw = (data as Record<string, unknown>[]).map(mapMatch);
+      }
+    } catch { /* backend unavailable */ }
+    if (raw.length === 0) {
+      try {
+        const { data: asReq } = await supabase.from('matches').select('*').eq('requester_id', userId);
+        const { data: asHost } = await supabase.from('matches').select('*').eq('host_id', userId);
+        const seen = new Set<string>();
+        const all: Record<string, unknown>[] = [];
+        for (const m of [...(asReq || []), ...(asHost || [])]) {
+          if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
+        }
+        raw = all.map(mapMatch);
+      } catch { setMatches([]); return; }
+    }
+    const enriched = await Promise.all(raw.map(enrichMatch));
+    setMatches(enriched);
+  };
+
+  const [requestPickerSpaceId, setRequestPickerSpaceId] = useState<string | null>(null);
+
+  const handleRequestSpace = (spaceId: string) => {
+    if (!user) { alert('Sign in to request a space.'); return; }
+    const space = spaces.find(s => s.id === spaceId);
+    if (space?.userId === user.id) { alert("You can't request your own space."); return; }
+    const existing = matches.find(m => m.spaceId === spaceId && m.requesterId === user.id && (m.status === 'requested' || m.status === 'active'));
+    if (existing) { alert('You already requested this space.'); return; }
+    const myRequests = requests.filter(r => r.userId === user.id);
+    if (myRequests.length === 0) {
+      alert('You need to create a storage request first before requesting a space.');
+      return;
+    }
+    setRequestPickerSpaceId(spaceId);
+  };
+
+  const handlePickRequest = (requestId: string) => {
+    if (!requestPickerSpaceId) return;
+    setRequestPickerSpaceId(null);
+    submitMatchDirect(requestPickerSpaceId, requestId);
+  };
+
+  const submitMatchDirect = async (spaceId: string, requestId?: string) => {
+    if (!user) return;
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/matches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ space_id: spaceId, requester_id: user.id, request_id: requestId || null }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || 'Failed to request space.');
+        return;
+      }
+      await loadMatches(user.id);
+    } catch {
+      alert('Failed to request space.');
+    }
+  };
+
+  const handleDeleteRequest = async (requestId: string) => {
+    if (!user) return;
+    if (!confirm('Delete this request? Any pending matches using it will also be removed.')) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/requests/${requestId}?user_id=${user.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || 'Failed to delete.');
+        return;
+      }
+      setRequests(prev => prev.filter(r => r.id !== requestId));
+      await loadMatches(user.id);
+    } catch {
+      try {
+        await supabase.from('matches').delete().eq('request_id', requestId).eq('status', 'requested');
+        await supabase.from('storage_requests').delete().eq('id', requestId);
+        setRequests(prev => prev.filter(r => r.id !== requestId));
+        await loadMatches(user.id);
+      } catch { alert('Failed to delete request.'); }
+    }
+  };
+
+  const handleDeleteSpace = async (spaceId: string) => {
+    if (!user) return;
+    if (!confirm('Delete this listing? Any pending match requests on it will also be removed.')) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/spaces/${spaceId}?user_id=${user.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || 'Failed to delete.');
+        return;
+      }
+      setSpaces(prev => prev.filter(s => s.id !== spaceId));
+      await loadMatches(user.id);
+    } catch {
+      try {
+        await supabase.from('matches').delete().eq('space_id', spaceId).eq('status', 'requested');
+        await supabase.from('storage_spaces').delete().eq('id', spaceId);
+        setSpaces(prev => prev.filter(s => s.id !== spaceId));
+        await loadMatches(user.id);
+      } catch { alert('Failed to delete listing.'); }
+    }
+  };
+
+  const handleAcceptMatch = async (matchId: string) => {
+    if (!user) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/matches/${matchId}/accept`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(err.detail || 'Failed.'); return; }
+      await loadMatches(user.id);
+    } catch { alert('Failed to accept.'); }
+  };
+
+  const handleDeclineMatch = async (matchId: string) => {
+    if (!user) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/matches/${matchId}/decline`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(err.detail || 'Failed.'); return; }
+      await loadMatches(user.id);
+    } catch { alert('Failed to decline.'); }
+  };
+
+  const handleMarkDone = async (matchId: string) => {
+    if (!user) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/matches/${matchId}/done`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(err.detail || 'Failed.'); return; }
+      await loadMatches(user.id);
+    } catch { alert('Failed to mark done.'); }
   };
 
   const uploadAvatar = async (file: File, userId: string): Promise<string> => {
@@ -485,9 +702,10 @@ function App() {
   };
 
   const mapSupabaseRequest = (r: Record<string, unknown>): StorageRequest => ({
-    userId: (r.user_id as string) || undefined,
+    id: (r.id as string) || undefined,
+    userId: (r.user_id as string) || (r.userId as string) || undefined,
     name: (r.name as string) || 'Student',
-    profileImage: (r.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
+    profileImage: (r.profileImage as string) || (r.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
     neighborhood: (r.neighborhood as string) || '',
     items: typeof r.items === 'string' ? (r.items ? (r.items as string).split(',').map((s: string) => s.trim()).filter(Boolean) : []) : [],
     budget: (r.budget as string) || '',
@@ -495,21 +713,35 @@ function App() {
     description: (r.description as string) || '',
   });
 
+  const inferMarketAvg = (sizeText: string): number => {
+    const t = (sizeText || '').toLowerCase();
+    if (/5\s*[x×]\s*5|small|locker|closet/.test(t)) return 85.0;
+    if (/10\s*[x×]\s*(15|20|25|30)|large/.test(t)) return 180.0;
+    return 120.0;
+  };
+
   const mapSupabaseSpace = (s: Record<string, unknown>): StorageSpace => {
     const items = s.items;
     const capacity = typeof items === 'string' ? (items ? (items as string).split(',').map((x: string) => x.trim()).filter(Boolean) : []) : (Array.isArray(s.capacity) ? s.capacity : []);
+    const price = s.price != null ? Number(s.price) : null;
+    const spaceType = (s.space_type as string) || (s.spaceType as string) || 'Storage';
+    const sizeText = spaceType + ' ' + (capacity as string[]).join(' ');
+    const marketAvg = s.marketAvg != null ? Number(s.marketAvg) : inferMarketAvg(sizeText);
+    const savings = s.savings != null ? Number(s.savings) : (price && price > 0 ? Math.round((marketAvg - price) * 100) / 100 : null);
     return {
       id: (s.id as string) || undefined,
       userId: (s.user_id as string) || (s.userId as string) || undefined,
       name: (s.name as string) || 'Host',
-      profileImage: (s.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
+      profileImage: (s.profileImage as string) || (s.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
       neighborhood: (s.neighborhood as string) || '',
-      spaceImage: (s.space_image as string) || 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64',
-      spaceType: (s.space_type as string) || 'Storage',
+      spaceImage: (s.spaceImage as string) || (s.space_image as string) || 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64',
+      spaceType,
       capacity: capacity as string[],
       timeframe: (s.timeframe as string) || '',
       description: (s.description as string) || '',
-      price: s.price != null ? Number(s.price) : null,
+      price,
+      marketAvg,
+      savings: savings && savings > 0 ? savings : null,
       avgRating: s.avgRating != null ? Number(s.avgRating) : null,
       ratingCount: s.ratingCount != null ? Number(s.ratingCount) : 0,
     };
@@ -522,7 +754,8 @@ function App() {
       const spaceRes = await fetch('http://127.0.0.1:8000/api/spaces');
       if (reqRes.ok && spaceRes.ok) {
         setRequests(await reqRes.json());
-        setSpaces(await spaceRes.json());
+        const spaceData = await spaceRes.json();
+        setSpaces((spaceData as Record<string, unknown>[]).map((s) => mapSupabaseSpace(s)));
         return;
       }
     } catch {
@@ -589,7 +822,7 @@ function App() {
           spaceImageUrl = await uploadSpaceImage(spaceImageFile, user.id);
         }
         const capacity = formData.items ? formData.items.split(',').map((s) => s.trim()).filter(Boolean) : [];
-        const { data, error } = await supabase.from('storage_spaces').insert({
+        const { error } = await supabase.from('storage_spaces').insert({
           user_id: user.id,
           name: profileName || formData.name,
           profile_image: profileAvatarUrl || formData.profileImage,
@@ -603,11 +836,11 @@ function App() {
           price: formData.price ? parseFloat(formData.price) : null,
         }).select().single();
         if (error) throw error;
-        setSpaces((prev) => [...prev, mapSupabaseSpace(data)]);
       }
       setSpaceImageFile(null);
       setSpaceImagePreview('');
       setShowModal(false);
+      await loadData();
     } catch (err) {
       console.error('Submit failed:', err);
       alert(err instanceof Error ? err.message : 'Failed to post. Check the console.');
@@ -741,10 +974,10 @@ function App() {
                     <div style={{
                       position: 'absolute', right: 0, top: '44px', background: '#fff',
                       borderRadius: '12px', border: '1px solid #e5e7eb',
-                      boxShadow: '0 8px 30px rgba(0,0,0,0.12)', minWidth: '200px',
-                      zIndex: 200, overflow: 'hidden',
+                      boxShadow: '0 8px 30px rgba(0,0,0,0.12)', minWidth: '280px', maxWidth: '340px',
+                      zIndex: 200, overflow: 'hidden', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
                     }}>
-                      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6' }}>
+                      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
                         <div style={{ fontWeight: '700', fontSize: '13px', color: '#111827', fontFamily: FONT }}>
                           {profileName || 'Badger'}
                         </div>
@@ -752,12 +985,134 @@ function App() {
                           {user.email || ''}
                         </div>
                       </div>
+
+                      {/* Your Requests section */}
+                      {(() => {
+                        const myReqs = requests.filter(r => r.userId === user.id && !matches.some(m => m.requestId === r.id && (m.status === 'active' || m.status === 'completed')));
+                        return (
+                          <div style={{ borderBottom: '1px solid #f3f4f6', padding: '10px 16px', flexShrink: 0 }}>
+                            <div style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#9ca3af', fontFamily: FONT, marginBottom: '8px' }}>
+                              Your Requests ({myReqs.length})
+                            </div>
+                            {myReqs.length === 0 ? (
+                              <div style={{ fontSize: '12px', color: '#d1d5db', fontFamily: FONT, padding: '4px 0' }}>No active requests</div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '120px', overflowY: 'auto' }}>
+                                {myReqs.map(req => {
+                                  const reqMatch = matches.find(m => m.requestId === req.id && m.status === 'requested');
+                                  return (
+                                    <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', background: '#f9fafb', borderRadius: '8px' }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: '12px', fontWeight: '600', color: '#111827', fontFamily: FONT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          {req.items.length > 0 ? req.items.slice(0, 2).join(', ') : req.neighborhood}
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: '#9ca3af', fontFamily: FONT }}>
+                                          {req.neighborhood}{req.budget ? ` · ${req.budget}` : ''}
+                                        </div>
+                                      </div>
+                                      <span style={{
+                                        fontSize: '9px', fontWeight: '700', fontFamily: FONT, textTransform: 'uppercase',
+                                        padding: '2px 6px', borderRadius: '20px', flexShrink: 0,
+                                        background: reqMatch ? '#fef3c7' : '#f3f4f6',
+                                        color: reqMatch ? '#d97706' : '#6b7280',
+                                      }}>
+                                        {reqMatch ? 'Pending' : 'Open'}
+                                      </span>
+                                      {!reqMatch && req.id && (
+                                        <button
+                                          onClick={e => { e.stopPropagation(); handleDeleteRequest(req.id!); }}
+                                          title="Delete request"
+                                          style={{
+                                            background: 'none', border: 'none', cursor: 'pointer', padding: '2px',
+                                            flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            color: '#d1d5db', transition: 'color 0.15s ease',
+                                          }}
+                                          onMouseEnter={e => (e.currentTarget.style.color = '#C5050C')}
+                                          onMouseLeave={e => (e.currentTarget.style.color = '#d1d5db')}
+                                        >
+                                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="3 6 5 6 21 6"/>
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                          </svg>
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Your Listings section */}
+                      {(() => {
+                        const mySpaces = spaces.filter(s => s.userId === user.id && !matches.some(m => m.spaceId === s.id && (m.status === 'active' || m.status === 'completed')));
+                        return (
+                          <div style={{ borderBottom: '1px solid #f3f4f6', padding: '10px 16px', flexShrink: 0 }}>
+                            <div style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#9ca3af', fontFamily: FONT, marginBottom: '8px' }}>
+                              Your Listings ({mySpaces.length})
+                            </div>
+                            {mySpaces.length === 0 ? (
+                              <div style={{ fontSize: '12px', color: '#d1d5db', fontFamily: FONT, padding: '4px 0' }}>No active listings</div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '120px', overflowY: 'auto' }}>
+                                {mySpaces.map(sp => {
+                                  const spaceMatch = matches.find(m => m.spaceId === sp.id && m.status === 'active');
+                                  const pendingCount = matches.filter(m => m.spaceId === sp.id && m.status === 'requested').length;
+                                  return (
+                                    <div key={sp.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', background: '#f9fafb', borderRadius: '8px' }}>
+                                      <img src={sp.spaceImage} alt={sp.spaceType} style={{ width: '28px', height: '28px', borderRadius: '6px', objectFit: 'cover', flexShrink: 0 }} />
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: '12px', fontWeight: '600', color: '#111827', fontFamily: FONT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          {sp.spaceType} · {sp.neighborhood}
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: '#9ca3af', fontFamily: FONT }}>
+                                          {sp.price ? `$${sp.price}/mo` : 'No price set'}
+                                          {pendingCount > 0 && !spaceMatch ? ` · ${pendingCount} pending` : ''}
+                                        </div>
+                                      </div>
+                                      <span style={{
+                                        fontSize: '9px', fontWeight: '700', fontFamily: FONT, textTransform: 'uppercase',
+                                        padding: '2px 6px', borderRadius: '20px', flexShrink: 0,
+                                        background: spaceMatch ? '#dcfce7' : pendingCount > 0 ? '#fef3c7' : '#f3f4f6',
+                                        color: spaceMatch ? '#16a34a' : pendingCount > 0 ? '#d97706' : '#6b7280',
+                                      }}>
+                                        {spaceMatch ? 'Active' : pendingCount > 0 ? `${pendingCount} req` : 'Open'}
+                                      </span>
+                                      {!spaceMatch && pendingCount === 0 && sp.id && (
+                                        <button
+                                          onClick={e => { e.stopPropagation(); handleDeleteSpace(sp.id!); }}
+                                          title="Delete listing"
+                                          style={{
+                                            background: 'none', border: 'none', cursor: 'pointer', padding: '2px',
+                                            flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            color: '#d1d5db', transition: 'color 0.15s ease',
+                                          }}
+                                          onMouseEnter={e => (e.currentTarget.style.color = '#C5050C')}
+                                          onMouseLeave={e => (e.currentTarget.style.color = '#d1d5db')}
+                                        >
+                                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="3 6 5 6 21 6"/>
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                          </svg>
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
                       <button
-                        onClick={() => { setShowProfileDropdown(false); setViewMode('profile'); if (user) loadProfileReviews(user.id); }}
+                        onClick={() => { setShowProfileDropdown(false); setViewMode('profile'); if (user) { loadProfileReviews(user.id); loadMatches(user.id); } }}
                         style={{
                           width: '100%', padding: '10px 16px', background: 'none', border: 'none',
                           textAlign: 'left', cursor: 'pointer', fontSize: '13px', color: '#111827',
-                          fontFamily: FONT, fontWeight: '500',
+                          fontFamily: FONT, fontWeight: '500', flexShrink: 0,
                         }}
                         onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
                         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -765,11 +1120,23 @@ function App() {
                         Profile Settings
                       </button>
                       <button
+                        onClick={() => { setShowProfileDropdown(false); setViewMode('history'); if (user) loadMatches(user.id); }}
+                        style={{
+                          width: '100%', padding: '10px 16px', background: 'none', border: 'none',
+                          textAlign: 'left', cursor: 'pointer', fontSize: '13px', color: '#111827',
+                          fontFamily: FONT, fontWeight: '500', flexShrink: 0,
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#f9fafb')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        History
+                      </button>
+                      <button
                         onClick={async () => { setShowProfileDropdown(false); await supabase.auth.signOut(); setViewMode('home'); }}
                         style={{
                           width: '100%', padding: '10px 16px', background: 'none', border: 'none',
                           borderTop: '1px solid #f3f4f6', textAlign: 'left', cursor: 'pointer',
-                          fontSize: '13px', color: '#C5050C', fontFamily: FONT, fontWeight: '500',
+                          fontSize: '13px', color: '#C5050C', fontFamily: FONT, fontWeight: '500', flexShrink: 0,
                         }}
                         onMouseEnter={e => (e.currentTarget.style.background = '#fff1f1')}
                         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -836,12 +1203,12 @@ function App() {
               <div style={{ marginBottom: '24px' }}>
                 <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827' }}>Storage Requests Near You</h2>
                 <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
-                  {requests.length} students looking for storage right now
+                  {requests.filter(r => !matches.some(m => m.requestId === r.id && (m.status === 'active' || m.status === 'completed'))).length} students looking for storage right now
                 </p>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-              {requests.map((request, index) => (
-                <StorageRequestCard key={index} {...request} onContact={handleContact} />
+              {requests.filter(r => !matches.some(m => m.requestId === r.id && (m.status === 'active' || m.status === 'completed'))).map((request, index) => (
+                <StorageRequestCard key={request.id || index} {...request} onContact={handleContact} />
               ))}
               </div>
             </>
@@ -1068,6 +1435,211 @@ function App() {
                 </div>
               )}
             </div>
+
+            {/* Incoming Requests (host sees these) */}
+            {matches.filter(m => m.status === 'requested' && m.hostId === user.id).length > 0 && (
+              <div style={{
+                background: '#fff', borderRadius: '16px', border: '1px solid #e5e7eb',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.06)', padding: '28px', marginTop: '24px',
+              }}>
+                <h3 style={{ fontWeight: '800', fontSize: '18px', color: '#111827', fontFamily: FONT, margin: 0, marginBottom: '20px' }}>
+                  Incoming Requests
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {matches.filter(m => m.status === 'requested' && m.hostId === user.id).map(match => (
+                    <div key={match.id} style={{
+                      background: '#fffbeb', borderRadius: '14px', padding: '18px',
+                      border: '1px solid #fde68a',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                        <div style={{
+                          width: '44px', height: '44px', borderRadius: '50%', background: '#e5e7eb',
+                          overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {match.requesterAvatar ? (
+                            <img src={match.requesterAvatar} alt={match.requesterName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <span style={{ fontSize: '16px', fontWeight: '700', color: '#C5050C', fontFamily: FONT }}>
+                              {(match.requesterName || 'S').charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            onClick={() => handleContact(match.requesterId)}
+                            style={{ fontWeight: '700', fontSize: '15px', color: '#C5050C', fontFamily: FONT, cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.15s ease' }}
+                            onMouseEnter={e => (e.currentTarget.style.textDecorationColor = '#C5050C')}
+                            onMouseLeave={e => (e.currentTarget.style.textDecorationColor = 'transparent')}
+                          >
+                            {match.requesterName}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#6b7280', fontFamily: FONT }}>
+                            wants your space: {match.spaceName}
+                          </div>
+                          {match.requestItems && (
+                            <div style={{ fontSize: '12px', color: '#9ca3af', fontFamily: FONT, marginTop: '2px' }}>
+                              Items: {match.requestItems} {match.requestBudget ? `· Budget: ${match.requestBudget}` : ''}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          onClick={() => handleAcceptMatch(match.id)}
+                          style={{
+                            flex: 1, background: '#16a34a', color: '#fff', border: 'none', borderRadius: '10px',
+                            padding: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: FONT,
+                            transition: 'background 0.15s ease',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = '#15803d')}
+                          onMouseLeave={e => (e.currentTarget.style.background = '#16a34a')}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={() => handleDeclineMatch(match.id)}
+                          style={{
+                            flex: 1, background: '#fff', color: '#C5050C', border: '1.5px solid #C5050C', borderRadius: '10px',
+                            padding: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: FONT,
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#fff1f1'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = '#fff'; }}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Pending Jobs (active matches for both host and requester) */}
+            {matches.filter(m => m.status === 'active').length > 0 && (
+              <div style={{
+                background: '#fff', borderRadius: '16px', border: '1px solid #e5e7eb',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.06)', padding: '28px', marginTop: '24px',
+              }}>
+                <h3 style={{ fontWeight: '800', fontSize: '18px', color: '#111827', fontFamily: FONT, margin: 0, marginBottom: '20px' }}>
+                  Pending Jobs
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {matches.filter(m => m.status === 'active').map(match => {
+                    const isHost = match.hostId === user.id;
+                    const myDone = isHost ? match.hostDone : match.requesterDone;
+                    const otherDone = isHost ? match.requesterDone : match.hostDone;
+                    const otherName = isHost ? match.requesterName : match.hostName;
+                    return (
+                      <div key={match.id} style={{
+                        background: '#f9fafb', borderRadius: '14px', padding: '18px',
+                        border: '1px solid #e5e7eb',
+                      }}>
+                        <div style={{ display: 'flex', gap: '14px', marginBottom: '14px' }}>
+                          {match.spaceImage && (
+                            <img src={match.spaceImage} alt={match.spaceName} style={{
+                              width: '80px', height: '60px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0,
+                            }} />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: '700', fontSize: '15px', color: '#111827', fontFamily: FONT }}>{match.spaceName}</div>
+                            <div style={{ fontSize: '12px', color: '#6b7280', fontFamily: FONT, marginTop: '2px' }}>
+                              {match.spaceNeighborhood} · {match.spaceType}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#6b7280', fontFamily: FONT, marginTop: '4px' }}>
+                              {isHost ? `Requester: ${match.requesterName}` : `Host: ${match.hostName}`}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                          <span style={{
+                            fontSize: '11px', fontWeight: '600', fontFamily: FONT, textTransform: 'uppercase',
+                            letterSpacing: '0.05em', color: '#6b7280',
+                          }}>
+                            Status:
+                          </span>
+                          <span style={{
+                            fontSize: '12px', fontWeight: '600', fontFamily: FONT,
+                            background: myDone ? '#dcfce7' : '#fef3c7',
+                            color: myDone ? '#16a34a' : '#d97706',
+                            padding: '3px 10px', borderRadius: '20px',
+                          }}>
+                            You: {myDone ? 'Done' : 'In progress'}
+                          </span>
+                          <span style={{
+                            fontSize: '12px', fontWeight: '600', fontFamily: FONT,
+                            background: otherDone ? '#dcfce7' : '#fef3c7',
+                            color: otherDone ? '#16a34a' : '#d97706',
+                            padding: '3px 10px', borderRadius: '20px',
+                          }}>
+                            {otherName}: {otherDone ? 'Done' : 'In progress'}
+                          </span>
+                        </div>
+
+                        {!myDone && (
+                          <button
+                            onClick={() => handleMarkDone(match.id)}
+                            style={{
+                              width: '100%', background: '#C5050C', color: '#fff', border: 'none', borderRadius: '10px',
+                              padding: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: FONT,
+                              transition: 'background 0.15s ease',
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+                            onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+                          >
+                            Mark as Done
+                          </button>
+                        )}
+                        {myDone && !otherDone && (
+                          <p style={{ fontSize: '12px', color: '#6b7280', fontFamily: FONT, textAlign: 'center', margin: 0 }}>
+                            Waiting for {otherName} to confirm...
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Sent Requests (requester sees these - waiting for host) */}
+            {matches.filter(m => m.status === 'requested' && m.requesterId === user.id).length > 0 && (
+              <div style={{
+                background: '#fff', borderRadius: '16px', border: '1px solid #e5e7eb',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.06)', padding: '28px', marginTop: '24px',
+              }}>
+                <h3 style={{ fontWeight: '800', fontSize: '18px', color: '#111827', fontFamily: FONT, margin: 0, marginBottom: '20px' }}>
+                  Sent Requests
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {matches.filter(m => m.status === 'requested' && m.requesterId === user.id).map(match => (
+                    <div key={match.id} style={{
+                      background: '#eff6ff', borderRadius: '14px', padding: '18px',
+                      border: '1px solid #bfdbfe',
+                    }}>
+                      <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+                        {match.spaceImage && (
+                          <img src={match.spaceImage} alt={match.spaceName} style={{
+                            width: '60px', height: '46px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0,
+                          }} />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827', fontFamily: FONT }}>{match.spaceName}</div>
+                          <div style={{ fontSize: '12px', color: '#6b7280', fontFamily: FONT }}>Host: {match.hostName}</div>
+                        </div>
+                        <span style={{
+                          fontSize: '11px', fontWeight: '700', fontFamily: FONT, textTransform: 'uppercase',
+                          background: '#fef3c7', color: '#d97706', padding: '4px 10px', borderRadius: '20px', flexShrink: 0,
+                        }}>
+                          Pending
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1078,12 +1650,20 @@ function App() {
               <div style={{ marginBottom: '24px' }}>
                 <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827' }}>Storage Spaces Near You</h2>
                 <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
-                  {spaces.length} spaces available from fellow Badgers
+                  {spaces.filter(s => !matches.some(m => m.spaceId === s.id && (m.status === 'active' || m.status === 'completed'))).length} spaces available from fellow Badgers
                 </p>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-              {spaces.map((space, index) => (
-                <StorageSpaceCard key={space.id || index} {...space} onRate={openRatingModal} onContact={handleContact} onViewReviews={handleViewReviews} />
+              {spaces.filter(s => !matches.some(m => m.spaceId === s.id && (m.status === 'active' || m.status === 'completed'))).map((space, index) => (
+                <StorageSpaceCard
+                  key={space.id || index}
+                  {...space}
+                  onRate={openRatingModal}
+                  onContact={handleContact}
+                  onViewReviews={handleViewReviews}
+                  onRequestSpace={space.userId !== user.id ? handleRequestSpace : undefined}
+                  hasRequested={matches.some(m => m.spaceId === space.id && m.requesterId === user.id && (m.status === 'requested' || m.status === 'active'))}
+                />
               ))}
               </div>
             </>
@@ -1098,6 +1678,87 @@ function App() {
               <AuthCard onSuccess={() => setViewMode('space')} />
             </div>
           )
+        )}
+
+        {/* HISTORY */}
+        {viewMode === 'history' && user && (
+          <div style={{ maxWidth: '640px', margin: '0 auto', padding: '40px 0' }}>
+            <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+              History
+            </h2>
+            <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px', fontFamily: FONT }}>
+              Your completed storage matches.
+            </p>
+
+            {matches.filter(m => m.status === 'completed').length === 0 ? (
+              <div style={{
+                background: '#fff', borderRadius: '16px', border: '1px solid #e5e7eb',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.06)', padding: '40px 28px', textAlign: 'center',
+              }}>
+                <p style={{ fontSize: '14px', color: '#9ca3af', fontFamily: FONT }}>
+                  No completed jobs yet. Completed matches will appear here.
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {matches.filter(m => m.status === 'completed').map(match => {
+                  const isHost = match.hostId === user.id;
+                  const otherName = isHost ? match.requesterName : match.hostName;
+                  const otherAvatar = isHost ? match.requesterAvatar : match.hostAvatar;
+                  return (
+                    <div
+                      key={match.id}
+                      onClick={() => setHistoryDetail(match)}
+                      style={{
+                        background: '#fff', borderRadius: '16px', border: '1px solid #e5e7eb',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.06)', overflow: 'hidden',
+                        cursor: 'pointer', transition: 'box-shadow 0.2s ease, transform 0.2s ease',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 8px 30px rgba(0,0,0,0.12)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                    >
+                      <div style={{ display: 'flex', gap: '16px', padding: '20px', alignItems: 'center' }}>
+                        <div style={{
+                          width: '48px', height: '48px', borderRadius: '50%', background: '#e5e7eb',
+                          overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {otherAvatar ? (
+                            <img src={otherAvatar} alt={otherName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <span style={{ fontSize: '18px', fontWeight: '700', color: '#C5050C', fontFamily: FONT }}>
+                              {(otherName || 'U').charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                            <div style={{ fontWeight: '700', fontSize: '15px', color: '#111827', fontFamily: FONT }}>{otherName}</div>
+                            <span style={{
+                              fontSize: '10px', fontWeight: '700', fontFamily: FONT, textTransform: 'uppercase',
+                              background: '#dcfce7', color: '#16a34a', padding: '2px 8px', borderRadius: '20px',
+                              letterSpacing: '0.05em',
+                            }}>
+                              Completed
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#374151', fontFamily: FONT }}>
+                            {isHost ? 'Stored for them' : 'They hosted your items'}
+                            {match.spaceName ? ` · ${match.spaceName}` : ''}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#9ca3af', fontFamily: FONT, marginTop: '2px' }}>
+                            {new Date(match.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </div>
+                        </div>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5" style={{ flexShrink: 0 }}>
+                          <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
       </main>
 
@@ -1715,6 +2376,241 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Request Picker Modal */}
+      {requestPickerSpaceId && user && (() => {
+        const myRequests = requests.filter(r => r.userId === user.id);
+        const availableRequests = myRequests.filter(r =>
+          !matches.some(m => m.requestId === r.id && (m.status === 'active' || m.status === 'completed'))
+        );
+        const targetSpace = spaces.find(s => s.id === requestPickerSpaceId);
+        return (
+          <div
+            onClick={() => setRequestPickerSpaceId(null)}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: '20px',
+            }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: '#fff', borderRadius: '20px', padding: '28px',
+                width: '100%', maxWidth: '440px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+                position: 'relative', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+              }}
+            >
+              <button
+                onClick={() => setRequestPickerSpaceId(null)}
+                style={{
+                  position: 'absolute', top: '16px', right: '16px',
+                  background: '#f3f4f6', border: 'none', cursor: 'pointer', fontSize: '16px',
+                  color: '#6b7280', borderRadius: '50%', width: '32px', height: '32px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                ✕
+              </button>
+
+              <h3 style={{ fontWeight: '800', fontSize: '18px', color: '#111827', fontFamily: FONT, marginBottom: '4px', paddingRight: '30px' }}>
+                Choose a Request
+              </h3>
+              <p style={{ fontSize: '13px', color: '#6b7280', fontFamily: FONT, marginBottom: '20px' }}>
+                Select which of your storage requests to use{targetSpace ? ` for ${targetSpace.name}'s ${targetSpace.spaceType}` : ''}.
+              </p>
+
+              <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
+                {availableRequests.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center', padding: '30px 0',
+                  }}>
+                    <p style={{ fontSize: '14px', color: '#9ca3af', fontFamily: FONT, marginBottom: '16px' }}>
+                      You have no available requests. Create one first!
+                    </p>
+                    <button
+                      onClick={() => { setRequestPickerSpaceId(null); openModal('request'); }}
+                      style={{
+                        background: '#C5050C', color: '#fff', border: 'none', borderRadius: '10px',
+                        padding: '10px 20px', fontSize: '14px', fontWeight: '700', cursor: 'pointer',
+                        fontFamily: FONT, transition: 'background 0.15s ease',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+                      onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+                    >
+                      Create a Request
+                    </button>
+                  </div>
+                ) : (
+                  availableRequests.map(req => (
+                    <div
+                      key={req.id}
+                      onClick={() => req.id && handlePickRequest(req.id)}
+                      style={{
+                        background: '#f9fafb', border: '1.5px solid #e5e7eb', borderRadius: '14px',
+                        padding: '16px', cursor: 'pointer', transition: 'all 0.15s ease',
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.borderColor = '#C5050C';
+                        e.currentTarget.style.background = '#fef2f2';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(197,5,12,0.1)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.borderColor = '#e5e7eb';
+                        e.currentTarget.style.background = '#f9fafb';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5">
+                          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                          <circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        <span style={{ fontSize: '12px', color: '#6b7280', fontFamily: FONT }}>{req.neighborhood}</span>
+                        {req.budget && (
+                          <>
+                            <span style={{ fontSize: '12px', color: '#d1d5db' }}>·</span>
+                            <span style={{ fontSize: '12px', color: '#6b7280', fontFamily: FONT }}>{req.budget}</span>
+                          </>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: req.description ? '8px' : '0' }}>
+                        {req.items.map((item, i) => (
+                          <span key={i} style={{
+                            background: '#fff', border: '1px solid #e5e7eb', borderRadius: '20px',
+                            padding: '2px 8px', fontSize: '11px', color: '#374151', fontWeight: '500', fontFamily: FONT,
+                          }}>
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                      {req.description && (
+                        <p style={{ fontSize: '12px', color: '#9ca3af', fontFamily: FONT, margin: 0, lineHeight: '1.5' }}>
+                          {req.description.length > 80 ? req.description.slice(0, 80) + '…' : req.description}
+                        </p>
+                      )}
+                      {req.timeframe && (
+                        <div style={{ fontSize: '11px', color: '#2563eb', fontFamily: FONT, marginTop: '6px', fontWeight: '600' }}>
+                          {req.timeframe}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <button
+                onClick={() => setRequestPickerSpaceId(null)}
+                style={{
+                  width: '100%', marginTop: '16px', background: 'transparent',
+                  color: '#6b7280', border: '1.5px solid #e5e7eb', borderRadius: '10px',
+                  padding: '10px', fontSize: '13px', fontWeight: '600', cursor: 'pointer',
+                  fontFamily: FONT, transition: 'all 0.15s ease', flexShrink: 0,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#C5050C'; e.currentTarget.style.color = '#C5050C'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.color = '#6b7280'; }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* History Detail Popup */}
+      {historyDetail && user && (() => {
+        const m = historyDetail;
+        const isHost = m.hostId === user.id;
+        const otherName = isHost ? m.requesterName : m.hostName;
+        const otherAvatar = isHost ? m.requesterAvatar : m.hostAvatar;
+        const otherId = isHost ? m.requesterId : m.hostId;
+        return (
+          <div
+            onClick={() => setHistoryDetail(null)}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: '20px',
+            }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: '#fff', borderRadius: '20px',
+                width: '100%', maxWidth: '480px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+                overflow: 'hidden', position: 'relative',
+              }}
+            >
+              <button
+                onClick={() => setHistoryDetail(null)}
+                style={{ position: 'absolute', top: '16px', right: '16px', background: 'rgba(0,0,0,0.4)', border: 'none', cursor: 'pointer', fontSize: '16px', color: '#fff', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1 }}
+              >
+                ✕
+              </button>
+
+              {m.spaceImage && (
+                <img src={m.spaceImage} alt={m.spaceName} style={{ width: '100%', height: '200px', objectFit: 'cover', display: 'block' }} />
+              )}
+
+              <div style={{ padding: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <h3 style={{ fontWeight: '800', fontSize: '20px', color: '#111827', fontFamily: FONT, margin: 0 }}>
+                    {m.spaceName || 'Storage Space'}
+                  </h3>
+                  <span style={{
+                    fontSize: '10px', fontWeight: '700', fontFamily: FONT, textTransform: 'uppercase',
+                    background: '#dcfce7', color: '#16a34a', padding: '3px 8px', borderRadius: '20px',
+                  }}>
+                    Completed
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '13px', color: '#6b7280', fontFamily: FONT, marginBottom: '16px' }}>
+                  {[m.spaceNeighborhood, m.spaceType].filter(Boolean).join(' · ')}
+                  {m.spacePrice ? ` · $${m.spacePrice}/mo` : ''}
+                </div>
+
+                <div style={{ height: '1px', background: '#f3f4f6', marginBottom: '16px' }} />
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                  <div style={{
+                    width: '44px', height: '44px', borderRadius: '50%', background: '#e5e7eb',
+                    overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {otherAvatar ? (
+                      <img src={otherAvatar} alt={otherName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <span style={{ fontSize: '16px', fontWeight: '700', color: '#C5050C', fontFamily: FONT }}>
+                        {(otherName || 'U').charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: '700', fontSize: '15px', color: '#111827', fontFamily: FONT }}>{otherName}</div>
+                    <div style={{ fontSize: '12px', color: '#6b7280', fontFamily: FONT }}>
+                      {isHost ? 'Requester' : 'Host'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleContact(otherId)}
+                    style={{
+                      background: '#C5050C', color: '#fff', border: 'none', borderRadius: '10px',
+                      padding: '8px 16px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: FONT,
+                      transition: 'background 0.15s ease',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+                    onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+                  >
+                    Contact
+                  </button>
+                </div>
+
+                <div style={{ fontSize: '12px', color: '#9ca3af', fontFamily: FONT }}>
+                  Matched on {new Date(m.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Auth toast */}
       {authToast && (

@@ -19,6 +19,8 @@ interface StorageSpaceCardProps {
   onRate?: (userId: string) => void;
   onContact?: (userId: string) => void;
   onViewReviews?: (userId: string) => void;
+  onRequestSpace?: (spaceId: string) => void;
+  hasRequested?: boolean;
 }
 
 const FONT = "'DM Sans', system-ui, sans-serif";
@@ -65,9 +67,12 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
   onRate,
   onContact,
   onViewReviews,
+  onRequestSpace,
+  hasRequested,
 }) => {
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
+  const [reqBtnHovered, setReqBtnHovered] = useState(false);
 
   return (
     <div
@@ -310,28 +315,54 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
           )}
         </div>
 
-        {/* Contact Button */}
-        <button
-          onMouseEnter={() => setBtnHovered(true)}
-          onMouseLeave={() => setBtnHovered(false)}
-          onClick={() => userId && onContact?.(userId)}
-          style={{
-            width: '100%',
-            background: btnHovered ? '#a0040a' : '#C5050C',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '10px',
-            padding: '12px',
-            fontSize: '14px',
-            fontWeight: '700',
-            cursor: 'pointer',
-            transition: 'background 0.15s ease',
-            fontFamily: FONT,
-            letterSpacing: '0.02em',
-          }}
-        >
-          Contact
-        </button>
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {id && onRequestSpace && (
+            <button
+              onMouseEnter={() => setReqBtnHovered(true)}
+              onMouseLeave={() => setReqBtnHovered(false)}
+              onClick={() => !hasRequested && onRequestSpace(id)}
+              disabled={hasRequested}
+              style={{
+                width: '100%',
+                background: hasRequested ? '#d1d5db' : reqBtnHovered ? '#a0040a' : '#C5050C',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                padding: '12px',
+                fontSize: '14px',
+                fontWeight: '700',
+                cursor: hasRequested ? 'default' : 'pointer',
+                transition: 'background 0.15s ease',
+                fontFamily: FONT,
+                letterSpacing: '0.02em',
+              }}
+            >
+              {hasRequested ? 'Requested' : 'Request Space'}
+            </button>
+          )}
+          <button
+            onMouseEnter={() => setBtnHovered(true)}
+            onMouseLeave={() => setBtnHovered(false)}
+            onClick={() => userId && onContact?.(userId)}
+            style={{
+              width: '100%',
+              background: 'transparent',
+              color: btnHovered ? '#a0040a' : '#6b7280',
+              border: `1.5px solid ${btnHovered ? '#C5050C' : '#e5e7eb'}`,
+              borderRadius: '10px',
+              padding: '10px',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              fontFamily: FONT,
+              letterSpacing: '0.02em',
+            }}
+          >
+            Contact
+          </button>
+        </div>
       </div>
     </div>
   );

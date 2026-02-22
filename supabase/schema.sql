@@ -83,6 +83,24 @@ create policy "Public read profiles" on profiles for select using (true);
 create policy "Users insert own profile" on profiles for insert with check (auth.uid() = id);
 create policy "Users update own profile" on profiles for update using (auth.uid() = id);
 
+-- Matches (requester ↔ host space pairing)
+create table if not exists matches (
+  id uuid default gen_random_uuid() primary key,
+  space_id uuid references storage_spaces(id) on delete cascade not null,
+  request_id uuid references storage_requests(id) on delete cascade,
+  requester_id uuid references auth.users(id) on delete cascade not null,
+  host_id uuid references auth.users(id) on delete cascade not null,
+  status text not null default 'requested' check (status in ('requested', 'active', 'completed', 'declined')),
+  requester_done boolean default false,
+  host_done boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table matches enable row level security;
+create policy "Public read matches" on matches for select using (true);
+create policy "Auth insert matches" on matches for insert with check (auth.uid() = requester_id);
+create policy "Auth update matches" on matches for update using (auth.uid() = requester_id or auth.uid() = host_id);
+
 -- IMPORTANT: Also create a Supabase Storage bucket for profile pictures:
 -- 1. Go to Supabase Dashboard → Storage → New Bucket
 -- 2. Name: "avatars", Public: ON → Create

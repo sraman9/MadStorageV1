@@ -109,6 +109,14 @@ class RatingCreate(BaseModel):
     score: int  # 1–5
     comment: Optional[str] = ""
 
+class MatchCreate(BaseModel):
+    space_id: str
+    requester_id: str
+    request_id: Optional[str] = None
+
+class MatchAction(BaseModel):
+    user_id: str
+
 class ScraperData(BaseModel):
     unit_size: str
     monthly_rate: float
@@ -129,6 +137,7 @@ def _request_to_card(item: dict) -> dict:
         if isinstance(items, str):
             items = [x.strip() for x in items.split(",") if x.strip()]
     return {
+        "id": item.get("id", ""),
         "userId": item.get("user_id", ""),
         "name": item.get("name", "Student"),
         "profileImage": item.get("profileImage") or item.get("profile_image", "https://i.pravatar.cc/150?img=11"),
@@ -314,6 +323,36 @@ def ingest_scraper_data(data: List[ScraperData]):
     # Here you would save to your DB (e.g., SQLite)
     return {"message": f"Successfully ingested {len(data)} commercial rates."}
 
+@app.delete("/api/requests/{request_id}")
+def delete_request(request_id: str, user_id: str):
+    """Delete a storage request owned by the user."""
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured.")
+    row = sb.table("storage_requests").select("user_id").eq("id", request_id).single().execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Request not found.")
+    if row.data["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own requests.")
+    sb.table("matches").delete().eq("request_id", request_id).eq("status", "requested").execute()
+    sb.table("storage_requests").delete().eq("id", request_id).execute()
+    return {"status": "deleted"}
+
+@app.delete("/api/spaces/{space_id}")
+def delete_space(space_id: str, user_id: str):
+    """Delete a storage space owned by the user."""
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured.")
+    row = sb.table("storage_spaces").select("user_id").eq("id", space_id).single().execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Space not found.")
+    if row.data["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own spaces.")
+    sb.table("matches").delete().eq("space_id", space_id).eq("status", "requested").execute()
+    sb.table("storage_spaces").delete().eq("id", space_id).execute()
+    return {"status": "deleted"}
+
 @app.get("/api/savings-calc")
 def calculate_savings(user_price: float, size: str):
     """Compares peer price vs commercial average from the scraper."""
@@ -325,6 +364,105 @@ def calculate_savings(user_price: float, size: str):
         "savings": savings,
         "percent_off": (savings / market_price) * 100
     }
+
+@app.get("/api/matches/user/{user_id}")
+def get_user_matches(user_id: str):
+    """Get all matches where the user is either the requester or host."""
+    sb = _get_supabase()
+    if not sb:
+        return []
+    as_requester = sb.table("matches").select("*").eq("requester_id", user_id).execute()
+    as_host = sb.table("matches").select("*").eq("host_id", user_id).execute()
+    seen = set()
+    results = []
+    for m in (as_requester.data or []) + (as_host.data or []):
+        if m["id"] not in seen:
+            seen.add(m["id"])
+            results.append(m)
+    return results
+
+@app.post("/api/matches")
+def create_match(match: MatchCreate):
+    """Requester requests a host's space."""
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured.")
+    space = sb.table("storage_spaces").select("user_id").eq("id", match.space_id).single().execute()
+    if not space.data:
+        raise HTTPException(status_code=404, detail="Space not found.")
+    host_id = space.data["user_id"]
+    if host_id == match.requester_id:
+        raise HTTPException(status_code=403, detail="You cannot request your own space.")
+    active = sb.table("matches").select("id").eq("space_id", match.space_id).eq("status", "active").execute()
+    if active.data:
+        raise HTTPException(status_code=409, detail="This space already has an active match.")
+    row = {
+        "space_id": match.space_id,
+        "request_id": match.request_id,
+        "requester_id": match.requester_id,
+        "host_id": host_id,
+        "status": "requested",
+    }
+    resp = sb.table("matches").insert(row).execute()
+    if not resp.data:
+        raise HTTPException(status_code=500, detail="Failed to create match.")
+    return resp.data[0]
+
+@app.patch("/api/matches/{match_id}/accept")
+def accept_match(match_id: str, action: MatchAction):
+    """Host accepts a match request."""
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured.")
+    match = sb.table("matches").select("*").eq("id", match_id).single().execute()
+    if not match.data:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if match.data["host_id"] != action.user_id:
+        raise HTTPException(status_code=403, detail="Only the host can accept.")
+    if match.data["status"] != "requested":
+        raise HTTPException(status_code=400, detail="Match is not in requested state.")
+    sb.table("matches").update({"status": "active"}).eq("id", match_id).execute()
+    sb.table("matches").update({"status": "declined"}).eq("space_id", match.data["space_id"]).eq("status", "requested").neq("id", match_id).execute()
+    return {"status": "active"}
+
+@app.patch("/api/matches/{match_id}/decline")
+def decline_match(match_id: str, action: MatchAction):
+    """Host declines a match request."""
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured.")
+    match = sb.table("matches").select("*").eq("id", match_id).single().execute()
+    if not match.data:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if match.data["host_id"] != action.user_id:
+        raise HTTPException(status_code=403, detail="Only the host can decline.")
+    sb.table("matches").update({"status": "declined"}).eq("id", match_id).execute()
+    return {"status": "declined"}
+
+@app.patch("/api/matches/{match_id}/done")
+def mark_match_done(match_id: str, action: MatchAction):
+    """Either party marks their side as done. When both are done, status becomes completed."""
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured.")
+    match = sb.table("matches").select("*").eq("id", match_id).single().execute()
+    if not match.data:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if match.data["status"] != "active":
+        raise HTTPException(status_code=400, detail="Match is not active.")
+    update: dict = {}
+    if action.user_id == match.data["requester_id"]:
+        update["requester_done"] = True
+    elif action.user_id == match.data["host_id"]:
+        update["host_done"] = True
+    else:
+        raise HTTPException(status_code=403, detail="You are not part of this match.")
+    sb.table("matches").update(update).eq("id", match_id).execute()
+    refreshed = sb.table("matches").select("*").eq("id", match_id).single().execute()
+    if refreshed.data and refreshed.data["requester_done"] and refreshed.data["host_done"]:
+        sb.table("matches").update({"status": "completed"}).eq("id", match_id).execute()
+        return {"status": "completed"}
+    return {"status": "active", "requester_done": refreshed.data["requester_done"], "host_done": refreshed.data["host_done"]}
 
 if __name__ == "__main__":
     import uvicorn
