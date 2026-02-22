@@ -1,127 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import StorageRequestCard from './components/StorageRequestCard';
 import StorageSpaceCard from './components/StorageSpaceCard';
 
-const sampleRequests = [
-  {
-    name: 'Emma Johnson',
-    profileImage: 'https://i.pravatar.cc/150?img=47',
-    neighborhood: 'State St',
-    items: ['4 boxes', '1 mini fridge', '2 suitcases'],
-    budget: '$150-200',
-    timeframe: 'May 15 - Aug 20',
-    description: 'International student heading home for summer. Need secure storage close to campus.',
-  },
-  {
-    name: 'Marcus Chen',
-    profileImage: 'https://i.pravatar.cc/150?img=12',
-    neighborhood: 'Langdon',
-    items: ['1 bicycle', '3 boxes', '1 desk lamp'],
-    budget: '$100-150',
-    timeframe: 'Jun 1 - Aug 30',
-    description: 'Summer internship in another city. Looking for reliable storage.',
-  },
-  {
-    name: 'Sarah Williams',
-    profileImage: 'https://i.pravatar.cc/150?img=45',
-    neighborhood: 'State St',
-    items: ['2 boxes', '1 TV', '1 desk'],
-    budget: '$120-180',
-    timeframe: 'May 20 - Sep 1',
-    description: 'Graduating senior storing items before moving.',
-  },
-  {
-    name: 'David Kim',
-    profileImage: 'https://i.pravatar.cc/150?img=33',
-    neighborhood: 'Langdon',
-    items: ['5 boxes', '1 mattress', '1 chair'],
-    budget: '$180-250',
-    timeframe: 'Jun 10 - Aug 25',
-    description: 'Study abroad semester, need temporary storage.',
-  },
-  {
-    name: 'Priya Patel',
-    profileImage: 'https://i.pravatar.cc/150?img=27',
-    neighborhood: 'Willy St',
-    items: ['3 boxes', '1 guitar', '1 lamp'],
-    budget: '$80-120',
-    timeframe: 'May 10 - Jul 31',
-    description: 'Subletting my apartment for the summer, need a place for a few things.',
-  },
-  {
-    name: 'Jake Torres',
-    profileImage: 'https://i.pravatar.cc/150?img=68',
-    neighborhood: 'Eagle Heights',
-    items: ['2 suitcases', '1 box', '1 backpack'],
-    budget: '$60-100',
-    timeframe: 'Jun 15 - Aug 15',
-    description: 'Grad student on research travel. Just need light summer storage.',
-  },
-];
 
-const sampleSpaces = [
-  {
-    name: 'Alex Rivera',
-    profileImage: 'https://i.pravatar.cc/150?img=11',
-    neighborhood: 'State St',
-    spaceImage: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=600&q=80',
-    spaceType: 'Basement',
-    capacity: ['8-10 boxes', '1 mini fridge', '2 suitcases', '1 bike'],
-    timeframe: 'May 1 - Sep 1',
-    description: 'Dry, clean basement with plenty of room. Easy street access, no stairs for large items. Happy to share photos.',
-  },
-  {
-    name: 'Mia Thompson',
-    profileImage: 'https://i.pravatar.cc/150?img=23',
-    neighborhood: 'Langdon',
-    spaceImage: 'https://images.unsplash.com/photo-1560185007-c5ca9d2c014d?w=600&q=80',
-    spaceType: 'Spare Room',
-    capacity: ['4-5 boxes', '1 desk', '1 chair', '1 lamp'],
-    timeframe: 'Jun 1 - Aug 20',
-    description: 'Furnished spare bedroom I won\'t be using. Secure, locked, climate controlled. Perfect for furniture and boxes.',
-  },
-  {
-    name: 'Ben Kowalski',
-    profileImage: 'https://i.pravatar.cc/150?img=52',
-    neighborhood: 'Eagle Heights',
-    spaceImage: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=600&q=80',
-    spaceType: 'Garage',
-    capacity: ['15+ boxes', '1 mattress', '1 couch', '2 bikes'],
-    timeframe: 'May 15 - Aug 31',
-    description: 'Two-car garage with one spot free all summer. Great for large items. Has a padlock, very secure.',
-  },
-  {
-    name: 'Chloe Park',
-    profileImage: 'https://i.pravatar.cc/150?img=44',
-    neighborhood: 'Willy St',
-    spaceImage: 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=600&q=80',
-    spaceType: 'Storage Closet',
-    capacity: ['3-4 boxes', '2 suitcases', '1 backpack'],
-    timeframe: 'May 20 - Jul 15',
-    description: 'Large walk-in closet with shelving. Great for lighter items and luggage. Climate controlled apartment building.',
-  },
-  {
-    name: 'Omar Hussain',
-    profileImage: 'https://i.pravatar.cc/150?img=61',
-    neighborhood: 'State St',
-    spaceImage: 'https://images.unsplash.com/photo-1591129841117-3adfd313e34f?w=600&q=80',
-    spaceType: 'Basement',
-    capacity: ['6-8 boxes', '1 TV', '1 mini fridge'],
-    timeframe: 'Jun 10 - Sep 5',
-    description: 'Finished basement corner unit. Clean and dry. Staying in Madison all summer and happy to coordinate pickup/dropoff.',
-  },
-  {
-    name: 'Lily Nguyen',
-    profileImage: 'https://i.pravatar.cc/150?img=36',
-    neighborhood: 'Langdon',
-    spaceImage: 'https://images.unsplash.com/photo-1507652313519-d4e9174996dd?w=600&q=80',
-    spaceType: 'Spare Room',
-    capacity: ['5-6 boxes', '1 suitcase', '1 guitar', '1 lamp'],
-    timeframe: 'May 10 - Aug 10',
-    description: 'Second bedroom in my apartment, standing empty while my roommate is abroad. Plenty of closet space too.',
-  },
-];
+interface StorageRequest {
+  name: string;
+  profileImage: string;
+  neighborhood: string;
+  items: string[];
+  budget: string;
+  timeframe: string;
+  description: string;
+}
 
+interface StorageSpace {
+  name: string;
+  profileImage: string;
+  neighborhood: string;
+  spaceImage: string;
+  spaceType: string;
+  capacity: string[];
+  timeframe: string;
+  description: string;
+}
 const FONT = "'DM Sans', system-ui, sans-serif";
 
 function App() {
@@ -129,11 +30,72 @@ function App() {
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<'request' | 'space'>('request');
 
+  const [requests, setRequests] = useState<StorageRequest[]>([]);
+  const [spaces, setSpaces] = useState<StorageSpace[]>([]);
+
+  // --- NEW: State for Form Inputs ---
+  const [formData, setFormData] = useState({
+    name: "Bucky Badger", // Default for hackathon
+    profileImage: "https://i.pravatar.cc/150?img=11",
+    items: "",
+    budget: "",
+    timeframe: "",
+    neighborhood: "",
+    description: "",
+    spaceType: "",
+    spaceImage: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64" // Default image
+  });
+
+// 2. FETCH: This pulls from your Python API when the app loads
+useEffect(() => {
+  const loadData = async () => {
+    try {
+      const reqRes = await fetch('http://127.0.0.1:8000/api/requests');
+      const spaceRes = await fetch('http://127.0.0.1:8000/api/spaces');
+      setRequests(await reqRes.json());
+      setSpaces(await spaceRes.json());
+    } catch (err) {
+      console.error("Make sure your Python server is running on port 8000!");
+    }
+  };
+  loadData();
+}, []);
+
+
+
   const openModal = (type: 'request' | 'space') => {
     setModalType(type);
     setShowModal(true);
   };
 
+  // PASTE THIS RIGHT HERE:
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  const endpoint = modalType === 'request' ? 'requests' : 'spaces';
+  const payload = modalType === 'request'
+    ? { name: formData.name, profileImage: formData.profileImage, items: formData.items, budget: formData.budget, timeframe: formData.timeframe, neighborhood: formData.neighborhood, description: formData.description }
+    : { name: formData.name, profileImage: formData.profileImage, neighborhood: formData.neighborhood, spaceImage: formData.spaceImage, spaceType: formData.spaceType, items: formData.items, timeframe: formData.timeframe, description: formData.description };
+
+  try {
+    const response = await fetch(`http://127.0.0.1:8000/api/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.ok) {
+      const newItem = await response.json();
+      if (modalType === 'request') setRequests([...requests, newItem]);
+      else setSpaces([...spaces, newItem]);
+      setShowModal(false);
+    } else {
+      const err = await response.json().catch(() => ({}));
+      console.error('Submit failed:', response.status, err);
+    }
+  } catch (error) {
+    console.error("Connection failed:", error);
+  }
+};
   return (
     <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: FONT }}>
       <style>{`
@@ -266,11 +228,11 @@ function App() {
             <div style={{ marginBottom: '24px' }}>
               <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827' }}>Storage Requests Near You</h2>
               <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
-                {sampleRequests.length} students looking for storage right now
+                {requests.length} students looking for storage right now
               </p>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-              {sampleRequests.map((request, index) => (
+              {requests.map((request, index) => (
                 <StorageRequestCard key={index} {...request} />
               ))}
             </div>
@@ -283,11 +245,11 @@ function App() {
             <div style={{ marginBottom: '24px' }}>
               <h2 style={{ fontWeight: '800', fontSize: '22px', color: '#111827' }}>Storage Spaces Near You</h2>
               <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
-                {sampleSpaces.length} spaces available from fellow Badgers
+                {spaces.length} spaces available from fellow Badgers
               </p>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
-              {sampleSpaces.map((space, index) => (
+              {spaces.map((space, index) => (
                 <StorageSpaceCard key={index} {...space} />
               ))}
             </div>
@@ -325,18 +287,20 @@ function App() {
             {modalType === 'request' ? (
               <>
                 {[
-                  { label: 'What do you need to store?', placeholder: 'e.g., 4 boxes, 1 mini fridge' },
-                  { label: 'Budget', placeholder: 'e.g., $150-200' },
-                  { label: 'Timeframe', placeholder: 'e.g., May 15 - Aug 20' },
-                ].map(({ label, placeholder }) => (
+                  { label: 'What do you need to store?', key: 'items' as const, placeholder: 'e.g., 4 boxes, 1 mini fridge' },
+                  { label: 'Budget', key: 'budget' as const, placeholder: 'e.g., $150-200' },
+                  { label: 'Timeframe', key: 'timeframe' as const, placeholder: 'e.g., May 15 - Aug 20' },
+                ].map(({ label, key, placeholder }) => (
                   <div key={label} style={{ marginBottom: '20px' }}>
                     <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>{label}</label>
-                    <input placeholder={placeholder} style={{
-                      width: '100%', padding: '12px 14px', borderRadius: '10px',
-                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
-                    }}
-                      onFocus={e => (e.currentTarget.style.borderColor = '#C5050C')}
-                      onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+                    <input 
+                      value={formData[key]} // Links the input to your state
+                      onChange={(e) => setFormData({ ...formData, [key]: e.target.value })} // Updates state as you type
+                      placeholder={placeholder} 
+                      style={{
+                        width: '100%', padding: '12px 14px', borderRadius: '10px',
+                        border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                      }}
                     />
                   </div>
                 ))}
@@ -345,10 +309,14 @@ function App() {
               <>
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Space Type</label>
-                  <select style={{
-                    width: '100%', padding: '12px 14px', borderRadius: '10px',
-                    border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
-                  }}>
+                  <select 
+                    value={formData.spaceType} //
+                    onChange={(e) => setFormData({ ...formData, spaceType: e.target.value })} //
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
+                    }}
+                  >
                     <option value="">Select a space type</option>
                     {['Basement', 'Garage', 'Spare Room', 'Storage Closet', 'Attic', 'Other'].map(t => <option key={t}>{t}</option>)}
                   </select>
@@ -356,32 +324,41 @@ function App() {
 
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>What can it fit?</label>
-                  <input placeholder="e.g., 5-6 boxes, 1 mini fridge, 1 bike" style={{
-                    width: '100%', padding: '12px 14px', borderRadius: '10px',
-                    border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
-                  }}
-                    onFocus={e => (e.currentTarget.style.borderColor = '#C5050C')}
-                    onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+                  <input 
+                    value={formData.items} // Add this
+                    onChange={(e) => setFormData({ ...formData, items: e.target.value })} // Add this
+                    placeholder="e.g., 5-6 boxes, 1 mini fridge, 1 bike" 
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    }}
                   />
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Available Timeframe</label>
-                  <input placeholder="e.g., May 15 - Aug 20" style={{
-                    width: '100%', padding: '12px 14px', borderRadius: '10px',
-                    border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
-                  }}
-                    onFocus={e => (e.currentTarget.style.borderColor = '#C5050C')}
-                    onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+                  <input 
+                    value={formData.timeframe} // Add this
+                    onChange={(e) => setFormData({ ...formData, timeframe: e.target.value })} // Add this
+                    placeholder="e.g., May 15 - Aug 20" 
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    }}
                   />
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Description</label>
-                  <textarea placeholder="Describe your space — size, access, any restrictions..." rows={3} style={{
-                    width: '100%', padding: '12px 14px', borderRadius: '10px',
-                    border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none', resize: 'vertical',
-                  }}
+                  <textarea 
+                    value={formData.description} //
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })} //
+                    placeholder="Describe your space — size, access, any restrictions..." 
+                    rows={3} 
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none', resize: 'vertical',
+                    }}
                     onFocus={e => (e.currentTarget.style.borderColor = '#C5050C')}
                     onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
                   />
@@ -408,16 +385,21 @@ function App() {
               <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
                 {modalType === 'request' ? 'Preferred Location' : 'Your Neighborhood'}
               </label>
-              <select style={{
+              <select 
+              value={formData.neighborhood} 
+              onChange={(e) => setFormData({ ...formData, neighborhood: e.target.value })}
+              style={{
                 width: '100%', padding: '12px 14px', borderRadius: '10px',
                 border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
-              }}>
-                <option value="">Select a neighborhood</option>
-                {['State St', 'Langdon', 'Willy St', 'Eagle Heights'].map(n => <option key={n}>{n}</option>)}
-              </select>
+              }}
+            >
+              <option value="">Select a neighborhood</option>
+              {['State St', 'Langdon', 'Willy St', 'Eagle Heights'].map(n => <option key={n}>{n}</option>)}
+            </select>
             </div>
 
             <button
+              onClick={handleSubmit}
               style={{
                 width: '100%', background: '#C5050C', color: '#fff', border: 'none',
                 borderRadius: '12px', padding: '14px', fontSize: '15px', fontWeight: '700',
