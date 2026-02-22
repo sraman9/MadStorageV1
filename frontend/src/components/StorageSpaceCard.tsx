@@ -9,6 +9,9 @@ interface StorageSpaceCardProps {
   capacity: string[]; // e.g. ["5-6 boxes", "1 mini fridge", "2 suitcases"]
   timeframe: string;
   description?: string;
+  price?: number | null;
+  marketAvg?: number;
+  savings?: number | null;
 }
 
 const FONT = "'DM Sans', system-ui, sans-serif";
@@ -22,6 +25,9 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
   capacity,
   timeframe,
   description,
+  price,
+  marketAvg,
+  savings,
 }) => {
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
@@ -207,6 +213,29 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
             <div style={{ fontSize: '13px', fontWeight: '700', color: '#1d4ed8', fontFamily: FONT }}>{timeframe}</div>
           </div>
         </div>
+
+        {/* Price & Savings */}
+        {(price != null && price > 0) && (
+          <div style={{
+            background: savings && savings > 0 ? '#f0fdf4' : '#f9fafb',
+            border: `1px solid ${savings && savings > 0 ? '#bbf7d0' : '#e5e7eb'}`,
+            borderRadius: '10px',
+            padding: '10px 14px',
+            marginBottom: '14px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: '700', color: '#111827', fontFamily: FONT, margin: 0 }}>${price}/mo</h2>
+              {savings != null && savings > 0 && (
+                <span style={{
+                  fontSize: '14px', fontWeight: '700', color: '#16a34a', fontFamily: FONT,
+                  background: '#dcfce7', padding: '4px 10px', borderRadius: '20px',
+                }}>
+                  Save ${savings}/mo vs commercial
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Contact Button */}
         <button
