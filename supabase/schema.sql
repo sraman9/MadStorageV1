@@ -32,15 +32,15 @@ create table if not exists storage_spaces (
   created_at timestamptz default now()
 );
 
--- Ratings (1–5 stars on storage spaces)
+-- Ratings (1–5 stars on a user's profile, visible across all their listings)
 create table if not exists ratings (
   id uuid default gen_random_uuid() primary key,
-  space_id uuid references storage_spaces(id) on delete cascade not null,
+  reviewed_user_id uuid references auth.users(id) on delete cascade not null,
   reviewer_id uuid references auth.users(id) on delete cascade not null,
   score smallint not null check (score >= 1 and score <= 5),
   comment text default '',
   created_at timestamptz default now(),
-  unique(space_id, reviewer_id)  -- one rating per user per space
+  unique(reviewed_user_id, reviewer_id)  -- one rating per reviewer per user
 );
 
 -- Row Level Security

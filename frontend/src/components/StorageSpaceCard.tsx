@@ -16,9 +16,9 @@ interface StorageSpaceCardProps {
   savings?: number | null;
   avgRating?: number | null;
   ratingCount?: number;
-  onRate?: (spaceId: string) => void;
+  onRate?: (userId: string) => void;
   onContact?: (userId: string) => void;
-  onViewReviews?: (spaceId: string) => void;
+  onViewReviews?: (userId: string) => void;
 }
 
 const FONT = "'DM Sans', system-ui, sans-serif";
@@ -278,7 +278,7 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
           {avgRating != null && ratingCount > 0 ? (
             <span
-              onClick={() => id && onViewReviews?.(id)}
+              onClick={() => userId && onViewReviews?.(userId)}
               style={{ cursor: 'pointer' }}
               title="View all reviews"
             >
@@ -287,9 +287,9 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
           ) : (
             <span style={{ fontSize: '12px', color: '#9ca3af', fontFamily: FONT }}>No ratings yet</span>
           )}
-          {id && onRate && (
+          {userId && onRate && (
             <button
-              onClick={() => onRate(id)}
+              onClick={() => onRate(userId)}
               style={{
                 background: 'transparent',
                 border: '1px solid #e5e7eb',

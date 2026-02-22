@@ -231,7 +231,7 @@ function App() {
   const [profileAvatarPreview, setProfileAvatarPreview] = useState('');
   const [contactPopup, setContactPopup] = useState<{ name: string; avatarUrl: string; phone: string; email: string } | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-  const [reviewsPopup, setReviewsPopup] = useState<{ spaceId: string; spaceName: string; reviews: { score: number; comment: string; reviewerName: string; reviewerAvatar: string; createdAt: string }[] } | null>(null);
+  const [reviewsPopup, setReviewsPopup] = useState<{ userId: string; userName: string; reviews: { score: number; comment: string; reviewerName: string; reviewerAvatar: string; createdAt: string }[] } | null>(null);
   const [, setReviewsLoading] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
@@ -241,6 +241,8 @@ function App() {
 
   const [requests, setRequests] = useState<StorageRequest[]>([]);
   const [spaces, setSpaces] = useState<StorageSpace[]>([]);
+  const [profileReviews, setProfileReviews] = useState<{ score: number; comment: string; reviewerName: string; reviewerAvatar: string; createdAt: string }[]>([]);
+  const [profileAvgRating, setProfileAvgRating] = useState<number | null>(null);
 
   const loadProfile = async (u: { id: string; email?: string; user_metadata?: { full_name?: string } }) => {
     setProfileName(u.user_metadata?.full_name || '');
@@ -283,49 +285,82 @@ function App() {
     price: "",
   });
 
-  // --- Rating modal state ---
-  const [ratingSpaceId, setRatingSpaceId] = useState<string | null>(null);
+  // --- Rating modal state (rates a user's profile) ---
+  const [ratingUserId, setRatingUserId] = useState<string | null>(null);
   const [ratingScore, setRatingScore] = useState(0);
   const [ratingHover, setRatingHover] = useState(0);
   const [ratingComment, setRatingComment] = useState('');
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
 
-  const openRatingModal = (spaceId: string) => {
-    if (!user) { alert('Sign in to rate a space.'); return; }
-    const space = spaces.find(s => s.id === spaceId);
-    if (space?.userId && space.userId === user.id) {
-      alert("You can't rate your own space.");
+  const openRatingModal = (targetUserId: string) => {
+    if (!user) { alert('Sign in to leave a review.'); return; }
+    if (targetUserId === user.id) {
+      alert("You can't review yourself.");
       return;
     }
-    setRatingSpaceId(spaceId);
+    setRatingUserId(targetUserId);
     setRatingScore(0);
     setRatingHover(0);
     setRatingComment('');
   };
 
   const submitRating = async () => {
-    if (!user || !ratingSpaceId || ratingScore < 1) return;
+    if (!user || !ratingUserId || ratingScore < 1) return;
     setRatingSubmitting(true);
     try {
       const res = await fetch('http://127.0.0.1:8000/api/ratings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ space_id: ratingSpaceId, reviewer_id: user.id, score: ratingScore, comment: ratingComment }),
+        body: JSON.stringify({ reviewed_user_id: ratingUserId, reviewer_id: user.id, score: ratingScore, comment: ratingComment }),
       });
       if (!res.ok) {
         const { data, error } = await supabase.from('ratings').upsert({
-          space_id: ratingSpaceId, reviewer_id: user.id, score: ratingScore, comment: ratingComment,
-        }, { onConflict: 'space_id,reviewer_id' }).select().single();
+          reviewed_user_id: ratingUserId, reviewer_id: user.id, score: ratingScore, comment: ratingComment,
+        }, { onConflict: 'reviewed_user_id,reviewer_id' }).select().single();
         if (error) throw error;
         if (!data) throw new Error('No data returned');
       }
-      setRatingSpaceId(null);
+      setRatingUserId(null);
       loadData();
     } catch (err) {
       console.error('Rating failed:', err);
       alert(err instanceof Error ? err.message : 'Failed to submit rating.');
     } finally {
       setRatingSubmitting(false);
+    }
+  };
+
+  const loadProfileReviews = async (userId: string) => {
+    try {
+      const { data: reviews } = await supabase
+        .from('ratings')
+        .select('*')
+        .eq('reviewed_user_id', userId)
+        .order('created_at', { ascending: false });
+
+      const enriched = await Promise.all(
+        (reviews ?? []).map(async (r: Record<string, unknown>) => {
+          const { data: profile } = await supabase.from('profiles').select('full_name, avatar_url').eq('id', r.reviewer_id).single();
+          return {
+            score: Number(r.score),
+            comment: (r.comment as string) || '',
+            reviewerName: profile?.full_name || 'Student',
+            reviewerAvatar: profile?.avatar_url || '',
+            createdAt: (r.created_at as string) || '',
+          };
+        })
+      );
+
+      setProfileReviews(enriched);
+      if (enriched.length > 0) {
+        const avg = enriched.reduce((sum, r) => sum + r.score, 0) / enriched.length;
+        setProfileAvgRating(Math.round(avg * 10) / 10);
+      } else {
+        setProfileAvgRating(null);
+      }
+    } catch {
+      setProfileReviews([]);
+      setProfileAvgRating(null);
     }
   };
 
@@ -400,14 +435,14 @@ function App() {
     }
   };
 
-  const handleViewReviews = async (spaceId: string) => {
+  const handleViewReviews = async (targetUserId: string) => {
     setReviewsLoading(true);
     try {
-      const space = spaces.find(s => s.id === spaceId);
+      const { data: targetProfile } = await supabase.from('profiles').select('full_name').eq('id', targetUserId).single();
       const { data: reviews } = await supabase
         .from('ratings')
         .select('*')
-        .eq('space_id', spaceId)
+        .eq('reviewed_user_id', targetUserId)
         .order('created_at', { ascending: false });
 
       const enriched = await Promise.all(
@@ -424,8 +459,8 @@ function App() {
       );
 
       setReviewsPopup({
-        spaceId,
-        spaceName: space?.name || 'Space',
+        userId: targetUserId,
+        userName: targetProfile?.full_name || 'User',
         reviews: enriched,
       });
     } catch {
@@ -718,7 +753,7 @@ function App() {
                         </div>
                       </div>
                       <button
-                        onClick={() => { setShowProfileDropdown(false); setViewMode('profile'); }}
+                        onClick={() => { setShowProfileDropdown(false); setViewMode('profile'); if (user) loadProfileReviews(user.id); }}
                         style={{
                           width: '100%', padding: '10px 16px', background: 'none', border: 'none',
                           textAlign: 'left', cursor: 'pointer', fontSize: '13px', color: '#111827',
@@ -960,6 +995,77 @@ function App() {
                 <span style={{ marginLeft: '12px', fontSize: '13px', color: '#16a34a', fontFamily: FONT }}>
                   Saved!
                 </span>
+              )}
+            </div>
+
+            {/* Your Reviews */}
+            <div style={{
+              background: '#fff', borderRadius: '16px', border: '1px solid #e5e7eb',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)', padding: '28px', marginTop: '24px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+                <h3 style={{ fontWeight: '800', fontSize: '18px', color: '#111827', fontFamily: FONT, margin: 0 }}>
+                  Your Reviews
+                </h3>
+                {profileAvgRating != null && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '14px', fontFamily: FONT }}>
+                    {[1, 2, 3, 4, 5].map(s => (
+                      <span key={s} style={{ color: s <= Math.round(profileAvgRating) ? '#f59e0b' : '#d1d5db', fontSize: '16px' }}>&#9733;</span>
+                    ))}
+                    <span style={{ fontSize: '13px', color: '#6b7280' }}>
+                      {profileAvgRating.toFixed(1)} ({profileReviews.length})
+                    </span>
+                  </span>
+                )}
+              </div>
+
+              {profileReviews.length === 0 ? (
+                <p style={{ fontSize: '14px', color: '#9ca3af', fontFamily: FONT, textAlign: 'center', padding: '24px 0' }}>
+                  No reviews yet. Reviews from other users will appear here.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {profileReviews.map((rev, idx) => (
+                    <div key={idx} style={{
+                      background: '#f9fafb', borderRadius: '14px', padding: '16px 18px',
+                      border: '1px solid #e5e7eb',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                        <div style={{
+                          width: '36px', height: '36px', borderRadius: '50%', background: '#e5e7eb',
+                          overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {rev.reviewerAvatar ? (
+                            <img src={rev.reviewerAvatar} alt={rev.reviewerName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : (
+                            <span style={{ fontSize: '14px', fontWeight: '700', color: '#C5050C', fontFamily: FONT }}>
+                              {rev.reviewerName.charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827', fontFamily: FONT }}>{rev.reviewerName}</div>
+                          <div style={{ fontSize: '11px', color: '#9ca3af', fontFamily: FONT }}>
+                            {new Date(rev.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                          {[1, 2, 3, 4, 5].map(s => (
+                            <span key={s} style={{ color: s <= rev.score ? '#f59e0b' : '#d1d5db', fontSize: '16px' }}>&#9733;</span>
+                          ))}
+                        </div>
+                      </div>
+                      {rev.comment && (
+                        <p style={{
+                          fontSize: '13px', color: '#374151', lineHeight: '1.6', fontFamily: FONT,
+                          margin: 0, marginTop: '4px',
+                        }}>
+                          {rev.comment}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -1248,9 +1354,9 @@ function App() {
         </div>
       )}
       {/* Rating Modal */}
-      {ratingSpaceId && (
+      {ratingUserId && (
         <div
-          onClick={() => setRatingSpaceId(null)}
+          onClick={() => setRatingUserId(null)}
           style={{
             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '20px',
@@ -1264,8 +1370,8 @@ function App() {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <h2 style={{ fontWeight: '800', fontSize: '20px', color: '#111827', fontFamily: FONT, margin: 0 }}>Rate This Space</h2>
-              <button onClick={() => setRatingSpaceId(null)}
+              <h2 style={{ fontWeight: '800', fontSize: '20px', color: '#111827', fontFamily: FONT, margin: 0 }}>Leave a Review</h2>
+              <button onClick={() => setRatingUserId(null)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: '#9ca3af' }}>
                 ✕
               </button>
@@ -1540,7 +1646,7 @@ function App() {
             </button>
 
             <h3 style={{ fontWeight: '800', fontSize: '18px', color: '#111827', fontFamily: FONT, marginBottom: '4px', paddingRight: '30px' }}>
-              Reviews for {reviewsPopup.spaceName}
+              Reviews for {reviewsPopup.userName}
             </h3>
             <p style={{ fontSize: '13px', color: '#6b7280', fontFamily: FONT, marginBottom: '20px' }}>
               {reviewsPopup.reviews.length} review{reviewsPopup.reviews.length !== 1 ? 's' : ''}
