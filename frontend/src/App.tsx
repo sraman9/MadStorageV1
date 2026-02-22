@@ -35,6 +35,27 @@ interface StorageSpace {
 }
 const FONT = "'DM Sans', system-ui, sans-serif";
 
+const formatPhone = (value: string): string => {
+  const digits = value.replace(/\D/g, '').slice(0, 10);
+  if (digits.length === 0) return '';
+  if (digits.length <= 3) return `(${digits}`;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+};
+
+const isValidPhone = (value: string): boolean => value.replace(/\D/g, '').length === 10;
+
+const formatBudget = (value: string): string => {
+  const cleaned = value.replace(/[^0-9\-$.,\s]/g, '');
+  if (!cleaned) return '';
+  if (!cleaned.startsWith('$')) return `$${cleaned}`;
+  return cleaned;
+};
+
+const ERR_STYLE: React.CSSProperties = {
+  fontSize: '12px', color: '#C5050C', marginTop: '4px', fontFamily: FONT,
+};
+
 // ─── Auth Card ────────────────────────────────────────────────────────────────
 function AuthCard({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
@@ -209,8 +230,14 @@ function App() {
   const [profileAvatarFile, setProfileAvatarFile] = useState<File | null>(null);
   const [profileAvatarPreview, setProfileAvatarPreview] = useState('');
   const [contactPopup, setContactPopup] = useState<{ name: string; avatarUrl: string; phone: string; email: string } | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [reviewsPopup, setReviewsPopup] = useState<{ spaceId: string; spaceName: string; reviews: { score: number; comment: string; reviewerName: string; reviewerAvatar: string; createdAt: string }[] } | null>(null);
+  const [, setReviewsLoading] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
+  const spaceImageInputRef = useRef<HTMLInputElement>(null);
+  const [spaceImageFile, setSpaceImageFile] = useState<File | null>(null);
+  const [spaceImagePreview, setSpaceImagePreview] = useState('');
 
   const [requests, setRequests] = useState<StorageRequest[]>([]);
   const [spaces, setSpaces] = useState<StorageSpace[]>([]);
@@ -311,6 +338,30 @@ function App() {
     return data.publicUrl;
   };
 
+  const handleSpaceImageSelect = (file: File | undefined) => {
+    if (!file) return;
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      alert('Only JPEG and PNG files are accepted.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File must be under 10MB.');
+      return;
+    }
+    setSpaceImageFile(file);
+    setSpaceImagePreview(URL.createObjectURL(file));
+    setFormErrors(p => ({ ...p, spaceImage: '' }));
+  };
+
+  const uploadSpaceImage = async (file: File, userId: string): Promise<string> => {
+    const ext = file.name.split('.').pop();
+    const path = `spaces/${userId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('avatars').upload(path, file);
+    if (error) throw error;
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    return data.publicUrl;
+  };
+
   const handleAvatarSelect = (file: File | undefined) => {
     if (!file) return;
     if (!['image/jpeg', 'image/png'].includes(file.type)) {
@@ -328,7 +379,8 @@ function App() {
   const handleOnboardingSubmit = async () => {
     if (!user) return;
     if (!profileAvatarFile) { alert('Please upload a profile picture.'); return; }
-    if (!profilePhone.trim()) { alert('Please enter your phone number.'); return; }
+    if (!isValidPhone(profilePhone)) { alert('Please enter a valid 10-digit phone number.'); return; }
+    if (!profileName.trim()) { alert('Please enter your display name.'); return; }
     try {
       const avatarUrl = await uploadAvatar(profileAvatarFile, user.id);
       const { error } = await supabase.from('profiles').upsert({
@@ -345,6 +397,41 @@ function App() {
       setShowOnboarding(false);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to save profile.');
+    }
+  };
+
+  const handleViewReviews = async (spaceId: string) => {
+    setReviewsLoading(true);
+    try {
+      const space = spaces.find(s => s.id === spaceId);
+      const { data: reviews } = await supabase
+        .from('ratings')
+        .select('*')
+        .eq('space_id', spaceId)
+        .order('created_at', { ascending: false });
+
+      const enriched = await Promise.all(
+        (reviews ?? []).map(async (r: Record<string, unknown>) => {
+          const { data: profile } = await supabase.from('profiles').select('full_name, avatar_url').eq('id', r.reviewer_id).single();
+          return {
+            score: Number(r.score),
+            comment: (r.comment as string) || '',
+            reviewerName: profile?.full_name || 'Student',
+            reviewerAvatar: profile?.avatar_url || '',
+            createdAt: (r.created_at as string) || '',
+          };
+        })
+      );
+
+      setReviewsPopup({
+        spaceId,
+        spaceName: space?.name || 'Space',
+        reviews: enriched,
+      });
+    } catch {
+      alert('Could not load reviews.');
+    } finally {
+      setReviewsLoading(false);
     }
   };
 
@@ -424,12 +511,29 @@ function App() {
 
   const openModal = (type: 'request' | 'space') => {
     setModalType(type);
+    setFormErrors({});
+    setSpaceImageFile(null);
+    setSpaceImagePreview('');
     setShowModal(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    const errs: Record<string, string> = {};
+    if (!formData.items.trim()) errs.items = 'Required';
+    if (!formData.neighborhood) errs.neighborhood = 'Please select a neighborhood';
+    if (modalType === 'request') {
+      if (!formData.budget.trim()) errs.budget = 'Required';
+      if (!formData.timeframe.trim()) errs.timeframe = 'Required';
+    } else {
+      if (!formData.spaceType) errs.spaceType = 'Please select a space type';
+      if (!formData.price || parseFloat(formData.price) <= 0) errs.price = 'Enter a price above $0';
+      if (!formData.timeframe.trim()) errs.timeframe = 'Required';
+      if (!spaceImageFile && formData.spaceImage === 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64') errs.spaceImage = 'Please upload a photo of your space';
+    }
+    if (Object.keys(errs).length > 0) { setFormErrors(errs); return; }
+    setFormErrors({});
     try {
       if (modalType === 'request') {
         const { data, error } = await supabase.from('storage_requests').insert({
@@ -445,13 +549,17 @@ function App() {
         if (error) throw error;
         setRequests((prev) => [...prev, mapSupabaseRequest(data)]);
       } else {
+        let spaceImageUrl = formData.spaceImage;
+        if (spaceImageFile) {
+          spaceImageUrl = await uploadSpaceImage(spaceImageFile, user.id);
+        }
         const capacity = formData.items ? formData.items.split(',').map((s) => s.trim()).filter(Boolean) : [];
         const { data, error } = await supabase.from('storage_spaces').insert({
           user_id: user.id,
           name: profileName || formData.name,
           profile_image: profileAvatarUrl || formData.profileImage,
           neighborhood: formData.neighborhood || 'Madison',
-          space_image: formData.spaceImage,
+          space_image: spaceImageUrl,
           space_type: formData.spaceType || 'Other',
           items: formData.items,
           capacity,
@@ -462,6 +570,8 @@ function App() {
         if (error) throw error;
         setSpaces((prev) => [...prev, mapSupabaseSpace(data)]);
       }
+      setSpaceImageFile(null);
+      setSpaceImagePreview('');
       setShowModal(false);
     } catch (err) {
       console.error('Submit failed:', err);
@@ -774,18 +884,25 @@ function App() {
 
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
-                  Phone Number
+                  Phone Number <span style={{ color: '#C5050C' }}>*</span>
                 </label>
                 <input
                   value={profilePhone}
-                  onChange={(e) => { setProfilePhone(e.target.value); setProfileSaved(false); }}
+                  onChange={(e) => { setProfilePhone(formatPhone(e.target.value)); setProfileSaved(false); }}
                   placeholder="(608) 555-1234"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={14}
                   style={{
                     width: '100%', padding: '12px 14px', borderRadius: '10px',
-                    border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    border: `1.5px solid ${profilePhone && !isValidPhone(profilePhone) ? '#C5050C' : '#e5e7eb'}`,
+                    fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
                     boxSizing: 'border-box',
                   }}
                 />
+                {profilePhone && !isValidPhone(profilePhone) && (
+                  <div style={ERR_STYLE}>Enter a 10-digit US phone number</div>
+                )}
               </div>
 
               <div style={{ marginBottom: '20px' }}>
@@ -805,6 +922,8 @@ function App() {
 
               <button
                 onClick={async () => {
+                  if (!profileName.trim()) { alert('Please enter a display name.'); return; }
+                  if (!isValidPhone(profilePhone)) { alert('Please enter a valid 10-digit phone number.'); return; }
                   try {
                     let avatarUrl = profileAvatarUrl;
                     if (profileAvatarFile) {
@@ -858,7 +977,7 @@ function App() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
               {spaces.map((space, index) => (
-                <StorageSpaceCard key={space.id || index} {...space} onRate={openRatingModal} onContact={handleContact} />
+                <StorageSpaceCard key={space.id || index} {...space} onRate={openRatingModal} onContact={handleContact} onViewReviews={handleViewReviews} />
               ))}
               </div>
             </>
@@ -912,80 +1031,122 @@ function App() {
               </div>
             ) : modalType === 'request' ? (
               <>
-                {[
-                  { label: 'What do you need to store?', key: 'items' as const, placeholder: 'e.g., 4 boxes, 1 mini fridge' },
-                  { label: 'Budget', key: 'budget' as const, placeholder: 'e.g., $150-200' },
-                  { label: 'Timeframe', key: 'timeframe' as const, placeholder: 'e.g., May 15 - Aug 20' },
-                ].map(({ label, key, placeholder }) => (
-                  <div key={label} style={{ marginBottom: '20px' }}>
-                    <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>{label}</label>
-                    <input 
-                      value={formData[key]} // Links the input to your state
-                      onChange={(e) => setFormData({ ...formData, [key]: e.target.value })} // Updates state as you type
-                      placeholder={placeholder} 
-                      style={{
-                        width: '100%', padding: '12px 14px', borderRadius: '10px',
-                        border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
-                      }}
-                    />
-                  </div>
-                ))}
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    What do you need to store? <span style={{ color: '#C5050C' }}>*</span>
+                  </label>
+                  <input
+                    value={formData.items}
+                    onChange={(e) => { setFormData({ ...formData, items: e.target.value }); setFormErrors(p => ({ ...p, items: '' })); }}
+                    placeholder="e.g., 4 boxes, 1 mini fridge"
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: `1.5px solid ${formErrors.items ? '#C5050C' : '#e5e7eb'}`, fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    }}
+                  />
+                  {formErrors.items && <div style={ERR_STYLE}>{formErrors.items}</div>}
+                </div>
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    Budget <span style={{ color: '#C5050C' }}>*</span>
+                  </label>
+                  <input
+                    value={formData.budget}
+                    onChange={(e) => { setFormData({ ...formData, budget: formatBudget(e.target.value) }); setFormErrors(p => ({ ...p, budget: '' })); }}
+                    placeholder="e.g., $150-200"
+                    maxLength={20}
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: `1.5px solid ${formErrors.budget ? '#C5050C' : '#e5e7eb'}`, fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    }}
+                  />
+                  {formErrors.budget && <div style={ERR_STYLE}>{formErrors.budget}</div>}
+                </div>
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    Timeframe <span style={{ color: '#C5050C' }}>*</span>
+                  </label>
+                  <input
+                    value={formData.timeframe}
+                    onChange={(e) => { setFormData({ ...formData, timeframe: e.target.value }); setFormErrors(p => ({ ...p, timeframe: '' })); }}
+                    placeholder="e.g., May 15 - Aug 20"
+                    maxLength={40}
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: `1.5px solid ${formErrors.timeframe ? '#C5050C' : '#e5e7eb'}`, fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    }}
+                  />
+                  {formErrors.timeframe && <div style={ERR_STYLE}>{formErrors.timeframe}</div>}
+                </div>
               </>
             ) : (
               <>
                 <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Space Type</label>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    Space Type <span style={{ color: '#C5050C' }}>*</span>
+                  </label>
                   <select 
-                    value={formData.spaceType} //
-                    onChange={(e) => setFormData({ ...formData, spaceType: e.target.value })} //
+                    value={formData.spaceType}
+                    onChange={(e) => { setFormData({ ...formData, spaceType: e.target.value }); setFormErrors(p => ({ ...p, spaceType: '' })); }}
                     style={{
                       width: '100%', padding: '12px 14px', borderRadius: '10px',
-                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
+                      border: `1.5px solid ${formErrors.spaceType ? '#C5050C' : '#e5e7eb'}`, fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
                     }}
                   >
                     <option value="">Select a space type</option>
                     {['Bedroom', 'Spare Bedroom', 'Bedroom Closet', 'Storage Closet', 'Other'].map(t => <option key={t}>{t}</option>)}
                   </select>
+                  {formErrors.spaceType && <div style={ERR_STYLE}>{formErrors.spaceType}</div>}
                 </div>
                 <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>What can it fit?</label>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    What can it fit? <span style={{ color: '#C5050C' }}>*</span>
+                  </label>
                   <input 
                     value={formData.items}
-                    onChange={(e) => setFormData({ ...formData, items: e.target.value })}
-                    placeholder="e.g., 5-6 boxes, 1 mini fridge, 1 bike (or 5x5, 10x10 for savings)" 
+                    onChange={(e) => { setFormData({ ...formData, items: e.target.value }); setFormErrors(p => ({ ...p, items: '' })); }}
+                    placeholder="e.g., 5-6 boxes, 1 mini fridge, 1 bike" 
                     style={{
                       width: '100%', padding: '12px 14px', borderRadius: '10px',
-                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                      border: `1.5px solid ${formErrors.items ? '#C5050C' : '#e5e7eb'}`, fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
                     }}
                   />
+                  {formErrors.items && <div style={ERR_STYLE}>{formErrors.items}</div>}
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Monthly rate ($)</label>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    Monthly rate ($) <span style={{ color: '#C5050C' }}>*</span>
+                  </label>
                   <input 
                     type="number"
-                    min="0"
+                    min="1"
                     step="5"
                     value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    onChange={(e) => { setFormData({ ...formData, price: e.target.value }); setFormErrors(p => ({ ...p, price: '' })); }}
                     placeholder="e.g., 45" 
                     style={{
                       width: '100%', padding: '12px 14px', borderRadius: '10px',
-                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                      border: `1.5px solid ${formErrors.price ? '#C5050C' : '#e5e7eb'}`, fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
                     }}
                   />
+                  {formErrors.price && <div style={ERR_STYLE}>{formErrors.price}</div>}
                 </div>
                 <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Available Timeframe</label>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    Available Timeframe <span style={{ color: '#C5050C' }}>*</span>
+                  </label>
                   <input 
-                    value={formData.timeframe} // Add this
-                    onChange={(e) => setFormData({ ...formData, timeframe: e.target.value })} // Add this
-                    placeholder="e.g., May 15 - Aug 20" 
+                    value={formData.timeframe}
+                    onChange={(e) => { setFormData({ ...formData, timeframe: e.target.value }); setFormErrors(p => ({ ...p, timeframe: '' })); }}
+                    placeholder="e.g., May 15 - Aug 20"
+                    maxLength={40}
                     style={{
                       width: '100%', padding: '12px 14px', borderRadius: '10px',
-                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                      border: `1.5px solid ${formErrors.timeframe ? '#C5050C' : '#e5e7eb'}`, fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
                     }}
                   />
+                  {formErrors.timeframe && <div style={ERR_STYLE}>{formErrors.timeframe}</div>}
                 </div>
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Description</label>
@@ -1003,18 +1164,47 @@ function App() {
                   />
                 </div>
                 <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Photo of Your Space</label>
-                  <div style={{
-                    border: '2px dashed #e5e7eb', borderRadius: '10px', padding: '24px',
-                    textAlign: 'center', cursor: 'pointer', background: '#fafafa',
-                  }}
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    Photo of Your Space <span style={{ color: '#C5050C' }}>*</span>
+                  </label>
+                  <input
+                    ref={spaceImageInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png"
+                    style={{ display: 'none' }}
+                    onChange={e => handleSpaceImageSelect(e.target.files?.[0])}
+                  />
+                  <div
+                    onClick={() => spaceImageInputRef.current?.click()}
+                    style={{
+                      border: `2px dashed ${formErrors.spaceImage ? '#C5050C' : '#e5e7eb'}`, borderRadius: '10px',
+                      padding: spaceImagePreview ? '0' : '24px',
+                      textAlign: 'center', cursor: 'pointer', background: '#fafafa',
+                      overflow: 'hidden', position: 'relative',
+                    }}
                     onMouseEnter={e => (e.currentTarget.style.borderColor = '#C5050C')}
-                    onMouseLeave={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = formErrors.spaceImage ? '#C5050C' : '#e5e7eb')}
                   >
-                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>📷</div>
-                    <div style={{ fontSize: '13px', color: '#6b7280', fontFamily: FONT }}>Click to upload a photo</div>
-                    <div style={{ fontSize: '11px', color: '#9ca3af', fontFamily: FONT, marginTop: '4px' }}>JPG, PNG up to 10MB</div>
+                    {spaceImagePreview ? (
+                      <div style={{ position: 'relative' }}>
+                        <img src={spaceImagePreview} alt="Space preview" style={{ width: '100%', height: '180px', objectFit: 'cover', display: 'block' }} />
+                        <div style={{
+                          position: 'absolute', bottom: '8px', right: '8px',
+                          background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '8px',
+                          padding: '4px 10px', fontSize: '11px', fontWeight: '600', fontFamily: FONT,
+                        }}>
+                          Change photo
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: '24px', marginBottom: '8px' }}>📷</div>
+                        <div style={{ fontSize: '13px', color: '#6b7280', fontFamily: FONT }}>Click to upload a photo</div>
+                        <div style={{ fontSize: '11px', color: '#9ca3af', fontFamily: FONT, marginTop: '4px' }}>JPG, PNG up to 10MB</div>
+                      </>
+                    )}
                   </div>
+                  {formErrors.spaceImage && <div style={ERR_STYLE}>{formErrors.spaceImage}</div>}
                 </div>
               </>
             )}
@@ -1023,19 +1213,20 @@ function App() {
               <>
                 <div style={{ marginBottom: '24px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
-                    {modalType === 'request' ? 'Preferred Location' : 'Your Neighborhood'}
+                    {modalType === 'request' ? 'Preferred Location' : 'Your Neighborhood'} <span style={{ color: '#C5050C' }}>*</span>
                   </label>
                   <select 
                     value={formData.neighborhood} 
-                    onChange={(e) => setFormData({ ...formData, neighborhood: e.target.value })}
+                    onChange={(e) => { setFormData({ ...formData, neighborhood: e.target.value }); setFormErrors(p => ({ ...p, neighborhood: '' })); }}
                     style={{
                       width: '100%', padding: '12px 14px', borderRadius: '10px',
-                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
+                      border: `1.5px solid ${formErrors.neighborhood ? '#C5050C' : '#e5e7eb'}`, fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
                     }}
                   >
                     <option value="">Select a neighborhood</option>
                     {['State St', 'Langdon', 'Willy St', 'Eagle Heights'].map(n => <option key={n}>{n}</option>)}
                   </select>
+                  {formErrors.neighborhood && <div style={ERR_STYLE}>{formErrors.neighborhood}</div>}
                 </div>
 
                 <button
@@ -1189,28 +1380,36 @@ function App() {
 
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
-                Phone Number
+                Phone Number <span style={{ color: '#C5050C' }}>*</span>
               </label>
               <input
                 value={profilePhone}
-                onChange={e => setProfilePhone(e.target.value)}
+                onChange={e => setProfilePhone(formatPhone(e.target.value))}
                 placeholder="(608) 555-1234"
+                type="tel"
+                inputMode="numeric"
+                maxLength={14}
                 style={{
                   width: '100%', padding: '12px 14px', borderRadius: '10px',
-                  border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                  border: `1.5px solid ${profilePhone && !isValidPhone(profilePhone) ? '#C5050C' : '#e5e7eb'}`,
+                  fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
                   boxSizing: 'border-box',
                 }}
               />
+              {profilePhone && !isValidPhone(profilePhone) && (
+                <div style={ERR_STYLE}>Enter a 10-digit US phone number</div>
+              )}
             </div>
 
             <div style={{ marginBottom: '24px' }}>
               <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
-                Display Name
+                Display Name <span style={{ color: '#C5050C' }}>*</span>
               </label>
               <input
                 value={profileName}
                 onChange={e => setProfileName(e.target.value)}
                 placeholder="Your name"
+                maxLength={50}
                 style={{
                   width: '100%', padding: '12px 14px', borderRadius: '10px',
                   border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
@@ -1306,6 +1505,101 @@ function App() {
                 width: '100%', marginTop: '20px', background: '#C5050C', color: '#fff', border: 'none',
                 borderRadius: '10px', padding: '12px', fontSize: '14px', fontWeight: '700',
                 cursor: 'pointer', fontFamily: FONT, transition: 'background 0.15s ease',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reviews Popup */}
+      {reviewsPopup && (
+        <div
+          onClick={() => setReviewsPopup(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: '20px',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: '20px', padding: '32px',
+              width: '100%', maxWidth: '480px', maxHeight: '80vh', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+              display: 'flex', flexDirection: 'column', position: 'relative',
+            }}
+          >
+            <button
+              onClick={() => setReviewsPopup(null)}
+              style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', color: '#9ca3af' }}
+            >
+              ✕
+            </button>
+
+            <h3 style={{ fontWeight: '800', fontSize: '18px', color: '#111827', fontFamily: FONT, marginBottom: '4px', paddingRight: '30px' }}>
+              Reviews for {reviewsPopup.spaceName}
+            </h3>
+            <p style={{ fontSize: '13px', color: '#6b7280', fontFamily: FONT, marginBottom: '20px' }}>
+              {reviewsPopup.reviews.length} review{reviewsPopup.reviews.length !== 1 ? 's' : ''}
+            </p>
+
+            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px', paddingRight: '4px' }}>
+              {reviewsPopup.reviews.length === 0 && (
+                <p style={{ fontSize: '14px', color: '#9ca3af', fontFamily: FONT, textAlign: 'center', padding: '30px 0' }}>
+                  No reviews yet.
+                </p>
+              )}
+              {reviewsPopup.reviews.map((rev, idx) => (
+                <div key={idx} style={{
+                  background: '#f9fafb', borderRadius: '14px', padding: '16px 18px',
+                  border: '1px solid #e5e7eb',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                    <div style={{
+                      width: '36px', height: '36px', borderRadius: '50%', background: '#e5e7eb',
+                      overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {rev.reviewerAvatar ? (
+                        <img src={rev.reviewerAvatar} alt={rev.reviewerName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <span style={{ fontSize: '14px', fontWeight: '700', color: '#C5050C', fontFamily: FONT }}>
+                          {rev.reviewerName.charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: '700', fontSize: '14px', color: '#111827', fontFamily: FONT }}>{rev.reviewerName}</div>
+                      <div style={{ fontSize: '11px', color: '#9ca3af', fontFamily: FONT }}>
+                        {new Date(rev.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                      {[1, 2, 3, 4, 5].map(s => (
+                        <span key={s} style={{ color: s <= rev.score ? '#f59e0b' : '#d1d5db', fontSize: '16px' }}>&#9733;</span>
+                      ))}
+                    </div>
+                  </div>
+                  {rev.comment && (
+                    <p style={{
+                      fontSize: '13px', color: '#374151', lineHeight: '1.6', fontFamily: FONT,
+                      margin: 0, marginTop: '4px',
+                    }}>
+                      {rev.comment}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setReviewsPopup(null)}
+              style={{
+                width: '100%', marginTop: '20px', background: '#C5050C', color: '#fff', border: 'none',
+                borderRadius: '10px', padding: '12px', fontSize: '14px', fontWeight: '700',
+                cursor: 'pointer', fontFamily: FONT, transition: 'background 0.15s ease', flexShrink: 0,
               }}
               onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
               onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}

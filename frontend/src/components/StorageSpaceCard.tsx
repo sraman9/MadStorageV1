@@ -18,6 +18,7 @@ interface StorageSpaceCardProps {
   ratingCount?: number;
   onRate?: (spaceId: string) => void;
   onContact?: (userId: string) => void;
+  onViewReviews?: (spaceId: string) => void;
 }
 
 const FONT = "'DM Sans', system-ui, sans-serif";
@@ -63,6 +64,7 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
   ratingCount = 0,
   onRate,
   onContact,
+  onViewReviews,
 }) => {
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
@@ -275,7 +277,13 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
         {/* Rating Display */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
           {avgRating != null && ratingCount > 0 ? (
-            <StarDisplay rating={avgRating} count={ratingCount} />
+            <span
+              onClick={() => id && onViewReviews?.(id)}
+              style={{ cursor: 'pointer' }}
+              title="View all reviews"
+            >
+              <StarDisplay rating={avgRating} count={ratingCount} />
+            </span>
           ) : (
             <span style={{ fontSize: '12px', color: '#9ca3af', fontFamily: FONT }}>No ratings yet</span>
           )}
