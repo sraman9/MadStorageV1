@@ -265,50 +265,52 @@ const handleSubmit = async (e: React.FormEvent) => {
         <div style={{
           maxWidth: '1280px',
           margin: '0 auto',
-          padding: '0 32px',
-          height: '64px',
+          padding: '0 16px',
+          minHeight: '64px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          position: 'relative',
+          gap: '12px',
+          flexWrap: 'nowrap',
         }}>
           {/* Logo */}
           <div
             onClick={() => setViewMode('home')}
-            style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', transition: 'opacity 0.15s ease' }}
+            style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', transition: 'opacity 0.15s ease', flexShrink: 0 }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
             <img
               src={logo}
               alt="MadStorage logo"
-              style={{ height: '52px', width: 'auto' }}
+              style={{ height: '40px', width: 'auto' }}
             />
-            <div>
-              <div style={{ fontWeight: '800', fontSize: '18px', color: '#111827', lineHeight: 1 }}>MadStorage</div>
-              <div style={{ fontSize: '11px', color: '#9ca3af', fontWeight: '500' }}>Student Storage Marketplace</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: '800', fontSize: '16px', color: '#111827', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>MadStorage</div>
+              <div style={{ fontSize: '10px', color: '#9ca3af', fontWeight: '500' }}>Student Storage Marketplace</div>
             </div>
           </div>
 
           {/* Toggle */}
           <div style={{
-            position: 'absolute', left: '50%', transform: 'translateX(-50%)',
             display: 'flex', background: '#f3f4f6', borderRadius: '100px', padding: '4px', gap: '2px',
+            flexShrink: 0,
           }}>
             {(['requests', 'space'] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 style={{
-                  padding: '8px 20px', borderRadius: '100px', border: 'none',
+                  padding: '8px 16px', borderRadius: '100px', border: 'none',
                   background: viewMode === mode ? '#C5050C' : 'transparent',
                   color: viewMode === mode ? '#fff' : '#6b7280',
-                  fontWeight: '600', fontSize: '14px', cursor: 'pointer',
+                  fontWeight: '600', fontSize: '13px', cursor: 'pointer',
                   transition: 'all 0.15s ease', fontFamily: FONT,
                   boxShadow: viewMode === mode ? '0 1px 4px rgba(197,5,12,0.3)' : 'none',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                {mode === 'requests' ? 'Storage Requests' : 'Storage Spaces'}
+                {mode === 'requests' ? 'Requests' : 'Spaces'}
               </button>
             ))}
           </div>
@@ -318,9 +320,9 @@ const handleSubmit = async (e: React.FormEvent) => {
             onClick={() => openModal(viewMode === 'space' ? 'space' : 'request')}
             style={{
               background: '#C5050C', color: '#fff', border: 'none', borderRadius: '10px',
-              padding: '10px 18px', fontWeight: '700', fontSize: '14px', cursor: 'pointer',
+              padding: '10px 16px', fontWeight: '700', fontSize: '13px', cursor: 'pointer',
               fontFamily: FONT, display: 'flex', alignItems: 'center', gap: '6px',
-              transition: 'background 0.15s ease',
+              transition: 'background 0.15s ease', flexShrink: 0, whiteSpace: 'nowrap',
             }}
             onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
             onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
