@@ -1,22 +1,50 @@
 import React, { useState } from 'react';
 
 interface StorageSpaceCardProps {
+  id?: string;
   name: string;
   profileImage: string;
   neighborhood: string;
   spaceImage: string;
-  spaceType: string; // e.g. "Basement", "Garage", "Spare Room"
-  capacity: string[]; // e.g. ["5-6 boxes", "1 mini fridge", "2 suitcases"]
+  spaceType: string;
+  capacity: string[];
   timeframe: string;
   description?: string;
   price?: number | null;
   marketAvg?: number;
   savings?: number | null;
+  avgRating?: number | null;
+  ratingCount?: number;
+  onRate?: (spaceId: string) => void;
 }
 
 const FONT = "'DM Sans', system-ui, sans-serif";
 
+function StarDisplay({ rating, count }: { rating: number; count: number }) {
+  const full = Math.floor(rating);
+  const half = rating - full >= 0.3;
+  const stars: React.ReactNode[] = [];
+  for (let i = 0; i < 5; i++) {
+    if (i < full) {
+      stars.push(<span key={i} style={{ color: '#f59e0b' }}>&#9733;</span>);
+    } else if (i === full && half) {
+      stars.push(<span key={i} style={{ color: '#f59e0b', opacity: 0.55 }}>&#9733;</span>);
+    } else {
+      stars.push(<span key={i} style={{ color: '#d1d5db' }}>&#9733;</span>);
+    }
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '14px', fontFamily: FONT }}>
+      {stars}
+      <span style={{ fontSize: '12px', color: '#6b7280', marginLeft: '2px' }}>
+        {rating.toFixed(1)} ({count})
+      </span>
+    </span>
+  );
+}
+
 const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
+  id,
   name,
   profileImage,
   neighborhood,
@@ -28,6 +56,9 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
   price,
   marketAvg,
   savings,
+  avgRating,
+  ratingCount = 0,
+  onRate,
 }) => {
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
@@ -236,6 +267,36 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
             </div>
           </div>
         )}
+
+        {/* Rating Display */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+          {avgRating != null && ratingCount > 0 ? (
+            <StarDisplay rating={avgRating} count={ratingCount} />
+          ) : (
+            <span style={{ fontSize: '12px', color: '#9ca3af', fontFamily: FONT }}>No ratings yet</span>
+          )}
+          {id && onRate && (
+            <button
+              onClick={() => onRate(id)}
+              style={{
+                background: 'transparent',
+                border: '1px solid #e5e7eb',
+                borderRadius: '8px',
+                padding: '4px 10px',
+                fontSize: '12px',
+                fontWeight: '600',
+                color: '#6b7280',
+                cursor: 'pointer',
+                fontFamily: FONT,
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#f59e0b'; e.currentTarget.style.color = '#f59e0b'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.color = '#6b7280'; }}
+            >
+              Rate
+            </button>
+          )}
+        </div>
 
         {/* Contact Button */}
         <button
