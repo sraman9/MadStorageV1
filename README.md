@@ -1,4 +1,5 @@
 # MadStorage - Student Storage Marketplace
+<img width="550" height="534" alt="logo" src="https://github.com/user-attachments/assets/6e300b44-0279-4769-aab6-b9be897842cf" />
 
 A responsive desktop/web React application for connecting students with storage solutions.
 
