@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import StorageRequestCard from './components/StorageRequestCard';
 import StorageSpaceCard from './components/StorageSpaceCard';
+import logo from './assets/logo.png';
 
 
 interface StorageRequest {
@@ -28,6 +29,150 @@ interface StorageSpace {
 }
 const FONT = "'DM Sans', system-ui, sans-serif";
 
+// ─── Auth Card ────────────────────────────────────────────────────────────────
+function AuthCard({ onSuccess }: { onSuccess: () => void }) {
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '11px 14px',
+    borderRadius: '10px',
+    border: '1.5px solid #e5e7eb',
+    fontSize: '14px',
+    fontFamily: FONT,
+    color: '#111827',
+    outline: 'none',
+    marginBottom: '12px',
+    boxSizing: 'border-box',
+  };
+
+  const handleSubmit = () => {
+    if (!email || !password) { setError('Please fill in all fields.'); return; }
+    if (mode === 'signup' && !name) { setError('Please enter your name.'); return; }
+    if (mode === 'signup' && !email.endsWith('@wisc.edu')) {
+      setError('Please use your @wisc.edu email address.');
+      return;
+    }
+    setError('');
+    onSuccess();
+  };
+
+  return (
+    <div style={{
+      background: '#fff',
+      borderRadius: '20px',
+      border: '1px solid #e5e7eb',
+      boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+      padding: '32px',
+      width: '100%',
+      maxWidth: '400px',
+    }}>
+      {/* Tab toggle */}
+      <div style={{
+        display: 'flex',
+        background: '#f3f4f6',
+        borderRadius: '100px',
+        padding: '4px',
+        marginBottom: '24px',
+        gap: '2px',
+      }}>
+        {(['signin', 'signup'] as const).map(m => (
+          <button
+            key={m}
+            onClick={() => { setMode(m); setError(''); }}
+            style={{
+              flex: 1,
+              padding: '8px',
+              borderRadius: '100px',
+              border: 'none',
+              background: mode === m ? '#C5050C' : 'transparent',
+              color: mode === m ? '#fff' : '#6b7280',
+              fontWeight: '600',
+              fontSize: '14px',
+              cursor: 'pointer',
+              fontFamily: FONT,
+              transition: 'all 0.15s ease',
+              boxShadow: mode === m ? '0 1px 4px rgba(197,5,12,0.3)' : 'none',
+            }}
+          >
+            {m === 'signin' ? 'Sign In' : 'Sign Up'}
+          </button>
+        ))}
+      </div>
+
+      {/* Fields */}
+      {mode === 'signup' && (
+        <input
+          placeholder="Full name"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          style={inputStyle}
+          onFocus={e => (e.currentTarget.style.borderColor = '#C5050C')}
+          onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+        />
+      )}
+      <input
+        placeholder={mode === 'signup' ? 'UW-Madison email (@wisc.edu)' : 'Email address'}
+        value={email}
+        onChange={e => setEmail(e.target.value)}
+        style={inputStyle}
+        onFocus={e => (e.currentTarget.style.borderColor = '#C5050C')}
+        onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+      />
+      <input
+        placeholder="Password"
+        type="password"
+        value={password}
+        onChange={e => setPassword(e.target.value)}
+        style={{ ...inputStyle, marginBottom: '0' }}
+        onFocus={e => (e.currentTarget.style.borderColor = '#C5050C')}
+        onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+      />
+
+      {/* Error */}
+      {error && (
+        <div style={{ fontSize: '13px', color: '#C5050C', marginTop: '10px', fontFamily: FONT }}>
+          {error}
+        </div>
+      )}
+
+      {/* Submit */}
+      <button
+        onClick={handleSubmit}
+        style={{
+          width: '100%',
+          background: '#C5050C',
+          color: '#fff',
+          border: 'none',
+          borderRadius: '10px',
+          padding: '13px',
+          fontSize: '15px',
+          fontWeight: '700',
+          cursor: 'pointer',
+          fontFamily: FONT,
+          marginTop: '16px',
+          transition: 'background 0.15s ease',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+        onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+      >
+        {mode === 'signin' ? 'Sign In' : 'Create Account'}
+      </button>
+
+      {mode === 'signup' && (
+        <p style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'center', marginTop: '12px', fontFamily: FONT }}>
+          MadStorage is exclusively for UW-Madison students.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
   const [viewMode, setViewMode] = useState<'home' | 'requests' | 'space'>('home');
   const [showModal, setShowModal] = useState(false);
@@ -134,12 +279,11 @@ const handleSubmit = async (e: React.FormEvent) => {
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
-            <div style={{
-              width: '32px', height: '32px', background: '#C5050C', borderRadius: '8px',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px',
-            }}>
-              🦡
-            </div>
+            <img
+              src={logo}
+              alt="MadStorage logo"
+              style={{ height: '52px', width: 'auto' }}
+            />
             <div>
               <div style={{ fontWeight: '800', fontSize: '18px', color: '#111827', lineHeight: 1 }}>MadStorage</div>
               <div style={{ fontSize: '11px', color: '#9ca3af', fontWeight: '500' }}>Student Storage Marketplace</div>
@@ -192,37 +336,19 @@ const handleSubmit = async (e: React.FormEvent) => {
 
         {/* HOME */}
         {viewMode === 'home' && (
-          <div style={{ textAlign: 'center', padding: '80px 0' }}>
-            <div style={{ fontSize: '64px', marginBottom: '24px' }}>🏠</div>
-            <h2 style={{ fontSize: '32px', fontWeight: '800', color: '#111827', marginBottom: '12px' }}>Welcome to MadStorage</h2>
-            <p style={{ fontSize: '16px', color: '#6b7280', marginBottom: '40px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0' }}>
+            <img
+              src={logo}
+              alt="MadStorage"
+              style={{ height: '180px', width: 'auto', marginBottom: '20px' }}
+            />
+            <h2 style={{ fontSize: '32px', fontWeight: '800', color: '#111827', marginBottom: '8px' }}>
+              Welcome to MadStorage
+            </h2>
+            <p style={{ fontSize: '16px', color: '#6b7280', marginBottom: '32px' }}>
               Connect with fellow students for storage solutions
             </p>
-            <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button
-                onClick={() => setViewMode('requests')}
-                style={{
-                  background: '#C5050C', color: '#fff', border: 'none', borderRadius: '12px',
-                  padding: '14px 28px', fontSize: '16px', fontWeight: '700', cursor: 'pointer', fontFamily: FONT,
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
-                onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
-              >
-                Storage Requests
-              </button>
-              <button
-                onClick={() => setViewMode('space')}
-                style={{
-                  background: '#fff', color: '#C5050C', border: '1.5px solid #C5050C',
-                  borderRadius: '12px', padding: '14px 28px', fontSize: '16px', fontWeight: '700',
-                  cursor: 'pointer', fontFamily: FONT,
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#fff1f1')}
-                onMouseLeave={e => (e.currentTarget.style.background = '#fff')}
-              >
-                Storage Spaces
-              </button>
-            </div>
+            <AuthCard onSuccess={() => setViewMode('requests')} />
           </div>
         )}
 
@@ -322,10 +448,9 @@ const handleSubmit = async (e: React.FormEvent) => {
                     }}
                   >
                     <option value="">Select a space type</option>
-                    {['Basement', 'Garage', 'Spare Room', 'Storage Closet', 'Attic', 'Other'].map(t => <option key={t}>{t}</option>)}
+                    {['Bedroom', 'Spare Bedroom', 'Bedroom Closet', 'Storage Closet', 'Other'].map(t => <option key={t}>{t}</option>)}
                   </select>
                 </div>
-
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>What can it fit?</label>
                   <input 
@@ -354,7 +479,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                     }}
                   />
                 </div>
-
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Available Timeframe</label>
                   <input 
@@ -367,7 +491,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                     }}
                   />
                 </div>
-
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Description</label>
                   <textarea 
@@ -383,7 +506,6 @@ const handleSubmit = async (e: React.FormEvent) => {
                     onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
                   />
                 </div>
-
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Photo of Your Space</label>
                   <div style={{
