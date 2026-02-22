@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import StorageRequestCard from './components/StorageRequestCard';
 import StorageSpaceCard from './components/StorageSpaceCard';
+import { supabase } from './lib/supabase';
 import logo from './assets/logo.png';
 
 
@@ -50,7 +51,7 @@ function AuthCard({ onSuccess }: { onSuccess: () => void }) {
     boxSizing: 'border-box',
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!email || !password) { setError('Please fill in all fields.'); return; }
     if (mode === 'signup' && !name) { setError('Please enter your name.'); return; }
     if (mode === 'signup' && !email.endsWith('@wisc.edu')) {
@@ -58,7 +59,22 @@ function AuthCard({ onSuccess }: { onSuccess: () => void }) {
       return;
     }
     setError('');
-    onSuccess();
+    try {
+      if (mode === 'signup') {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name: name } },
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+      onSuccess();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Something went wrong.');
+    }
   };
 
   return (
@@ -174,6 +190,7 @@ function AuthCard({ onSuccess }: { onSuccess: () => void }) {
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App() {
+  const [user, setUser] = useState<{ id: string } | null>(null);
   const [viewMode, setViewMode] = useState<'home' | 'requests' | 'space'>('home');
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<'request' | 'space'>('request');
@@ -181,7 +198,16 @@ function App() {
   const [requests, setRequests] = useState<StorageRequest[]>([]);
   const [spaces, setSpaces] = useState<StorageSpace[]>([]);
 
-  // --- NEW: State for Form Inputs ---
+  // --- Auth state: listen for sign in/out ──────────────────────────────────────
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // --- State for Form Inputs ---
   const [formData, setFormData] = useState({
     name: "Bucky Badger", // Default for hackathon
     profileImage: "https://i.pravatar.cc/150?img=11",
@@ -195,20 +221,58 @@ function App() {
     price: "",
   });
 
-// 2. FETCH: This pulls from your Python API when the app loads
-useEffect(() => {
+  const mapSupabaseRequest = (r: Record<string, unknown>): StorageRequest => ({
+    name: (r.name as string) || 'Student',
+    profileImage: (r.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
+    neighborhood: (r.neighborhood as string) || '',
+    items: typeof r.items === 'string' ? (r.items ? (r.items as string).split(',').map((s: string) => s.trim()).filter(Boolean) : []) : [],
+    budget: (r.budget as string) || '',
+    timeframe: (r.timeframe as string) || '',
+    description: (r.description as string) || '',
+  });
+
+  const mapSupabaseSpace = (s: Record<string, unknown>): StorageSpace => {
+    const items = s.items;
+    const capacity = typeof items === 'string' ? (items ? (items as string).split(',').map((x: string) => x.trim()).filter(Boolean) : []) : (Array.isArray(s.capacity) ? s.capacity : []);
+    return {
+      name: (s.name as string) || 'Host',
+      profileImage: (s.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
+      neighborhood: (s.neighborhood as string) || '',
+      spaceImage: (s.space_image as string) || 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64',
+      spaceType: (s.space_type as string) || 'Storage',
+      capacity: capacity as string[],
+      timeframe: (s.timeframe as string) || '',
+      description: (s.description as string) || '',
+      price: s.price != null ? Number(s.price) : null,
+    };
+  };
+
+  // Load data: try backend first (has savings), fallback to Supabase
   const loadData = async () => {
     try {
       const reqRes = await fetch('http://127.0.0.1:8000/api/requests');
       const spaceRes = await fetch('http://127.0.0.1:8000/api/spaces');
-      setRequests(await reqRes.json());
-      setSpaces(await spaceRes.json());
+      if (reqRes.ok && spaceRes.ok) {
+        setRequests(await reqRes.json());
+        setSpaces(await spaceRes.json());
+        return;
+      }
+    } catch {
+      /* backend not available */
+    }
+    try {
+      const { data: reqData } = await supabase.from('storage_requests').select('*');
+      const { data: spaceData } = await supabase.from('storage_spaces').select('*');
+      setRequests((reqData ?? []).map((r) => mapSupabaseRequest(r)));
+      setSpaces((spaceData ?? []).map((s) => mapSupabaseSpace(s)));
     } catch (err) {
-      console.error("Make sure your Python server is running on port 8000!");
+      console.error('Failed to load data:', err);
     }
   };
-  loadData();
-}, []);
+
+  useEffect(() => {
+    loadData();
+  }, []);
 
 
 
@@ -217,34 +281,47 @@ useEffect(() => {
     setShowModal(true);
   };
 
-  // PASTE THIS RIGHT HERE:
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  const endpoint = modalType === 'request' ? 'requests' : 'spaces';
-  const payload = modalType === 'request'
-    ? { name: formData.name, profileImage: formData.profileImage, items: formData.items, budget: formData.budget, timeframe: formData.timeframe, neighborhood: formData.neighborhood, description: formData.description }
-    : { name: formData.name, profileImage: formData.profileImage, neighborhood: formData.neighborhood, spaceImage: formData.spaceImage, spaceType: formData.spaceType, items: formData.items, timeframe: formData.timeframe, description: formData.description, price: formData.price ? parseFloat(formData.price) : null };
-
-  try {
-    const response = await fetch(`http://127.0.0.1:8000/api/${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (response.ok) {
-      const newItem = await response.json();
-      if (modalType === 'request') setRequests([...requests, newItem]);
-      else setSpaces([...spaces, newItem]);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    try {
+      if (modalType === 'request') {
+        const { data, error } = await supabase.from('storage_requests').insert({
+          user_id: user.id,
+          name: formData.name,
+          profile_image: formData.profileImage,
+          neighborhood: formData.neighborhood || 'Madison',
+          items: formData.items,
+          budget: formData.budget,
+          timeframe: formData.timeframe,
+          description: formData.description,
+        }).select().single();
+        if (error) throw error;
+        setRequests((prev) => [...prev, mapSupabaseRequest(data)]);
+      } else {
+        const capacity = formData.items ? formData.items.split(',').map((s) => s.trim()).filter(Boolean) : [];
+        const { data, error } = await supabase.from('storage_spaces').insert({
+          user_id: user.id,
+          name: formData.name,
+          profile_image: formData.profileImage,
+          neighborhood: formData.neighborhood || 'Madison',
+          space_image: formData.spaceImage,
+          space_type: formData.spaceType || 'Other',
+          items: formData.items,
+          capacity,
+          timeframe: formData.timeframe,
+          description: formData.description,
+          price: formData.price ? parseFloat(formData.price) : null,
+        }).select().single();
+        if (error) throw error;
+        setSpaces((prev) => [...prev, mapSupabaseSpace(data)]);
+      }
       setShowModal(false);
-    } else {
-      const err = await response.json().catch(() => ({}));
-      console.error('Submit failed:', response.status, err);
+    } catch (err) {
+      console.error('Submit failed:', err);
+      alert(err instanceof Error ? err.message : 'Failed to post. Check the console.');
     }
-  } catch (error) {
-    console.error("Connection failed:", error);
-  }
-};
+  };
   return (
     <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: FONT }}>
       <style>{`
@@ -315,21 +392,34 @@ const handleSubmit = async (e: React.FormEvent) => {
             ))}
           </div>
 
-          {/* CTA */}
-          <button
-            onClick={() => openModal(viewMode === 'space' ? 'space' : 'request')}
-            style={{
-              background: '#C5050C', color: '#fff', border: 'none', borderRadius: '10px',
-              padding: '10px 16px', fontWeight: '700', fontSize: '13px', cursor: 'pointer',
-              fontFamily: FONT, display: 'flex', alignItems: 'center', gap: '6px',
-              transition: 'background 0.15s ease', flexShrink: 0, whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
-            onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
-          >
-            <span style={{ fontSize: '16px', lineHeight: 1 }}>+</span>
-            {viewMode === 'space' ? 'List Your Space' : 'Create Storage Request'}
-          </button>
+          {/* CTA + Sign Out */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            <button
+              onClick={() => openModal(viewMode === 'space' ? 'space' : 'request')}
+              style={{
+                background: '#C5050C', color: '#fff', border: 'none', borderRadius: '10px',
+                padding: '10px 16px', fontWeight: '700', fontSize: '13px', cursor: 'pointer',
+                fontFamily: FONT, display: 'flex', alignItems: 'center', gap: '6px',
+                transition: 'background 0.15s ease', whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+              onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+            >
+              <span style={{ fontSize: '16px', lineHeight: 1 }}>+</span>
+              {viewMode === 'space' ? 'List Your Space' : 'Create Storage Request'}
+            </button>
+            {user && (
+              <button
+                onClick={async () => await supabase.auth.signOut()}
+                style={{
+                  background: 'transparent', color: '#6b7280', border: '1px solid #e5e7eb',
+                  borderRadius: '10px', padding: '8px 12px', fontSize: '12px', cursor: 'pointer', fontFamily: FONT,
+                }}
+              >
+                Sign Out
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -345,12 +435,44 @@ const handleSubmit = async (e: React.FormEvent) => {
               style={{ height: '180px', width: 'auto', marginBottom: '20px' }}
             />
             <h2 style={{ fontSize: '32px', fontWeight: '800', color: '#111827', marginBottom: '8px' }}>
-              Welcome to MadStorage
+              {user ? 'Welcome back' : 'Welcome to MadStorage'}
             </h2>
             <p style={{ fontSize: '16px', color: '#6b7280', marginBottom: '32px' }}>
               Connect with fellow students for storage solutions
             </p>
-            <AuthCard onSuccess={() => setViewMode('requests')} />
+            {user ? (
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={() => setViewMode('requests')}
+                  style={{
+                    background: '#C5050C', color: '#fff', border: 'none', borderRadius: '12px',
+                    padding: '14px 28px', fontSize: '16px', fontWeight: '700', cursor: 'pointer', fontFamily: FONT,
+                  }}
+                >
+                  View Storage Requests
+                </button>
+                <button
+                  onClick={() => { setViewMode('space'); }}
+                  style={{
+                    background: '#fff', color: '#C5050C', border: '1.5px solid #C5050C',
+                    borderRadius: '12px', padding: '14px 28px', fontSize: '16px', fontWeight: '700', cursor: 'pointer', fontFamily: FONT,
+                  }}
+                >
+                  View Storage Spaces
+                </button>
+                <button
+                  onClick={async () => { await supabase.auth.signOut(); }}
+                  style={{
+                    background: 'transparent', color: '#6b7280', border: '1px solid #e5e7eb',
+                    borderRadius: '12px', padding: '14px 20px', fontSize: '14px', cursor: 'pointer', fontFamily: FONT,
+                  }}
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <AuthCard onSuccess={() => setViewMode('requests')} />
+            )}
           </div>
         )}
 
@@ -416,7 +538,14 @@ const handleSubmit = async (e: React.FormEvent) => {
               </button>
             </div>
 
-            {modalType === 'request' ? (
+            {!user ? (
+              <div style={{ padding: '20px 0' }}>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px', fontFamily: FONT }}>
+                  Sign in to post your {modalType === 'request' ? 'request' : 'space'}.
+                </p>
+                <AuthCard onSuccess={() => {}} />
+              </div>
+            ) : modalType === 'request' ? (
               <>
                 {[
                   { label: 'What do you need to store?', key: 'items' as const, placeholder: 'e.g., 4 boxes, 1 mini fridge' },
@@ -525,35 +654,40 @@ const handleSubmit = async (e: React.FormEvent) => {
               </>
             )}
 
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
-                {modalType === 'request' ? 'Preferred Location' : 'Your Neighborhood'}
-              </label>
-              <select 
-              value={formData.neighborhood} 
-              onChange={(e) => setFormData({ ...formData, neighborhood: e.target.value })}
-              style={{
-                width: '100%', padding: '12px 14px', borderRadius: '10px',
-                border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
-              }}
-            >
-              <option value="">Select a neighborhood</option>
-              {['State St', 'Langdon', 'Willy St', 'Eagle Heights'].map(n => <option key={n}>{n}</option>)}
-            </select>
-            </div>
+            {user && (
+              <>
+                <div style={{ marginBottom: '24px' }}>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
+                    {modalType === 'request' ? 'Preferred Location' : 'Your Neighborhood'}
+                  </label>
+                  <select 
+                    value={formData.neighborhood} 
+                    onChange={(e) => setFormData({ ...formData, neighborhood: e.target.value })}
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', background: '#fff', outline: 'none',
+                    }}
+                  >
+                    <option value="">Select a neighborhood</option>
+                    {['State St', 'Langdon', 'Willy St', 'Eagle Heights'].map(n => <option key={n}>{n}</option>)}
+                  </select>
+                </div>
 
-            <button
-              onClick={handleSubmit}
-              style={{
-                width: '100%', background: '#C5050C', color: '#fff', border: 'none',
-                borderRadius: '12px', padding: '14px', fontSize: '15px', fontWeight: '700',
-                cursor: 'pointer', fontFamily: FONT,
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
-              onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
-            >
-              {modalType === 'request' ? 'Post Request' : 'List Space'}
-            </button>
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  style={{
+                    width: '100%', background: '#C5050C', color: '#fff', border: 'none',
+                    borderRadius: '12px', padding: '14px', fontSize: '15px', fontWeight: '700',
+                    cursor: 'pointer', fontFamily: FONT,
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#a0040a')}
+                  onMouseLeave={e => (e.currentTarget.style.background = '#C5050C')}
+                >
+                  {modalType === 'request' ? 'Post Request' : 'List Space'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
