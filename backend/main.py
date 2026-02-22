@@ -5,11 +5,29 @@ from typing import List, Optional
 from pathlib import Path
 import json
 import re
+import os
+from supabase import create_client, Client
+
+# Load .env from backend folder
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:
+    pass
 
 app = FastAPI(title="MadStorage API")
 
 # Path to parser's scraped rates (run: python parser/scripts/run_scraper.py)
 RATES_PATH = Path(__file__).resolve().parent.parent / "parser" / "data" / "scraped" / "rates.json"
+
+# Supabase (from env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+def _get_supabase() -> Client | None:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Enable CORS so your Vite frontend (usually port 5173) can talk to this API
 app.add_middleware(
@@ -18,11 +36,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# --- In-Memory "Database" ---
-storage_requests = []
-spaces_db = []
-storage_listings = []
 
 
 # --- Market rates from scraper (rates.json) ---
@@ -67,6 +80,7 @@ def _infer_standard_size(text: str) -> str:
 
 # --- Pydantic Models (Data Validation) ---
 class StorageRequest(BaseModel):
+    user_id: str  # From Supabase auth
     neighborhood: str
     name: Optional[str] = "Bucky Badger"
     profileImage: Optional[str] = "https://i.pravatar.cc/150?img=11"
@@ -76,6 +90,7 @@ class StorageRequest(BaseModel):
     description: Optional[str] = ""
 
 class StorageListing(BaseModel): 
+    user_id: str  # From Supabase auth
     name: str
     profileImage: str
     neighborhood: str
@@ -100,7 +115,7 @@ def health_check():
     return {"status": "MadStorage Backend Running", "location": "Madison, WI"}
 
 def _request_to_card(item: dict) -> dict:
-    """Transform backend request format to card format."""
+    """Transform backend/Supabase request format to card format."""
     if "items" in item and isinstance(item["items"], str):
         items = [x.strip() for x in item["items"].split(",") if x.strip()] if item["items"] else []
     else:
@@ -109,7 +124,7 @@ def _request_to_card(item: dict) -> dict:
             items = [x.strip() for x in items.split(",") if x.strip()]
     return {
         "name": item.get("name", "Student"),
-        "profileImage": item.get("profileImage", "https://i.pravatar.cc/150?img=11"),
+        "profileImage": item.get("profileImage") or item.get("profile_image", "https://i.pravatar.cc/150?img=11"),
         "neighborhood": item.get("neighborhood", ""),
         "items": items,
         "budget": item.get("budget") or (f"${item.get('price', 0)}" if "price" in item else ""),
@@ -118,14 +133,14 @@ def _request_to_card(item: dict) -> dict:
     }
 
 def _listing_to_card(item: dict) -> dict:
-    """Transform backend listing format to card format. Includes savings vs market rates."""
+    """Transform backend/Supabase listing format to card format. Includes savings vs market rates."""
     items_str = item.get("items", "")
     capacity = [x.strip() for x in items_str.split(",") if x.strip()] if items_str else item.get("capacity", [])
     if isinstance(capacity, str):
         capacity = [x.strip() for x in capacity.split(",") if x.strip()]
     if not capacity and item.get("size"):
         capacity = [item["size"]]
-    size_text = item.get("size", "") or item.get("spaceType", "") or " ".join(capacity)
+    size_text = item.get("size", "") or item.get("spaceType", "") or item.get("space_type", "") or " ".join(capacity)
     std_size = _infer_standard_size(size_text)
     market_rates = _load_market_rates()
     market_avg = market_rates.get(std_size, 100.0)
@@ -139,10 +154,10 @@ def _listing_to_card(item: dict) -> dict:
     savings = round(market_avg - price, 2) if price > 0 else None
     card = {
         "name": item.get("name") or item.get("host_name", "Host"),
-        "profileImage": item.get("profileImage", "https://i.pravatar.cc/150?img=11"),
+        "profileImage": item.get("profileImage") or item.get("profile_image", "https://i.pravatar.cc/150?img=11"),
         "neighborhood": item.get("neighborhood", ""),
-        "spaceImage": item.get("spaceImage", "https://images.unsplash.com/photo-1558618666-fcd25c85cd64"),
-        "spaceType": item.get("spaceType") or item.get("size", "Storage"),
+        "spaceImage": item.get("spaceImage") or item.get("space_image", "https://images.unsplash.com/photo-1558618666-fcd25c85cd64"),
+        "spaceType": item.get("spaceType") or item.get("space_type") or item.get("size", "Storage"),
         "capacity": capacity,
         "timeframe": item.get("timeframe", ""),
         "description": item.get("description", ""),
@@ -154,36 +169,77 @@ def _listing_to_card(item: dict) -> dict:
 
 @app.get("/api/requests")
 def get_all_requests():
-    """Returns the list of storage cards for the React Grid layout."""
-    return [_request_to_card(r) for r in storage_requests]
+    """Returns the list of storage cards from Supabase."""
+    sb = _get_supabase()
+    if not sb:
+        return []
+    resp = sb.table("storage_requests").select("*").execute()
+    return [_request_to_card(r) for r in (resp.data or [])]
 
 @app.get("/api/listings")
 def get_all_listings():
-    """Returns the 'Supply' - people offering storage."""
-    return [_listing_to_card(l) for l in storage_listings]
+    """Returns the 'Supply' - people offering storage from Supabase."""
+    sb = _get_supabase()
+    if not sb:
+        return []
+    resp = sb.table("storage_spaces").select("*").execute()
+    return [_listing_to_card(s) for s in (resp.data or [])]
 
 @app.get("/api/spaces")
 def get_all_spaces():
-    """Returns spaces (listings) - same data as /api/listings for frontend consistency."""
-    combined = storage_listings + spaces_db
-    return [_listing_to_card(s) for s in combined]
+    """Returns spaces from Supabase."""
+    sb = _get_supabase()
+    if not sb:
+        return []
+    resp = sb.table("storage_spaces").select("*").execute()
+    return [_listing_to_card(s) for s in (resp.data or [])]
 
 @app.post("/api/requests")
 def create_request(request: StorageRequest):
-    """Allows a student to post a new storage need."""
-    new_data = request.dict()
-    new_data["id"] = len(storage_requests) + 1
-    storage_requests.append(new_data)
-    return _request_to_card(new_data)
+    """Allows a student to post a new storage need to Supabase."""
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+    row = {
+        "user_id": request.user_id,
+        "name": request.name,
+        "profile_image": request.profileImage,
+        "neighborhood": request.neighborhood,
+        "items": request.items,
+        "budget": request.budget,
+        "timeframe": request.timeframe,
+        "description": request.description,
+    }
+    resp = sb.table("storage_requests").insert(row).select().execute()
+    if not resp.data or len(resp.data) == 0:
+        raise HTTPException(status_code=500, detail="Failed to create request")
+    return _request_to_card(resp.data[0])
 
 @app.post("/api/spaces")
 async def create_listing(data: StorageListing):
-    new_space = data.dict()
-    # Convert items string to capacity array for storage
-    items_str = new_space.get("items", "")
-    new_space["capacity"] = [x.strip() for x in items_str.split(",") if x.strip()] if items_str else []
-    spaces_db.append(new_space)
-    return _listing_to_card(new_space)
+    """Create a storage space in Supabase."""
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+    items_str = data.items or ""
+    capacity = [x.strip() for x in items_str.split(",") if x.strip()] if items_str else []
+    row = {
+        "user_id": data.user_id,
+        "name": data.name,
+        "profile_image": data.profileImage,
+        "neighborhood": data.neighborhood,
+        "space_image": data.spaceImage,
+        "space_type": data.spaceType,
+        "items": data.items,
+        "capacity": capacity,
+        "timeframe": data.timeframe,
+        "description": data.description,
+        "price": data.price,
+    }
+    resp = sb.table("storage_spaces").insert(row).select().execute()
+    if not resp.data or len(resp.data) == 0:
+        raise HTTPException(status_code=500, detail="Failed to create space")
+    return _listing_to_card(resp.data[0])
 
 
 
