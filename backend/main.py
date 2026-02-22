@@ -177,6 +177,7 @@ def _listing_to_card(item: dict, rating_stats: dict | None = None) -> dict:
     rs = (rating_stats or {}).get(space_id, {})
     card = {
         "id": space_id,
+        "userId": item.get("user_id", ""),
         "name": item.get("name") or item.get("host_name", "Host"),
         "profileImage": item.get("profileImage") or item.get("profile_image", "https://i.pravatar.cc/150?img=11"),
         "neighborhood": item.get("neighborhood", ""),
@@ -288,13 +289,16 @@ def create_rating(rating: RatingCreate):
     sb = _get_supabase()
     if not sb:
         raise HTTPException(status_code=503, detail="Supabase not configured.")
+    space = sb.table("storage_spaces").select("user_id").eq("id", rating.space_id).single().execute()
+    if space.data and space.data.get("user_id") == rating.reviewer_id:
+        raise HTTPException(status_code=403, detail="You cannot rate your own space.")
     row = {
         "space_id": rating.space_id,
         "reviewer_id": rating.reviewer_id,
         "score": rating.score,
         "comment": rating.comment or "",
     }
-    resp = sb.table("ratings").upsert(row, on_conflict="space_id,reviewer_id").select().execute()
+    resp = sb.table("ratings").upsert(row, on_conflict="space_id,reviewer_id").execute()
     if not resp.data:
         raise HTTPException(status_code=500, detail="Failed to save rating")
     return resp.data[0]

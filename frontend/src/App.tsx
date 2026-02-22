@@ -17,6 +17,7 @@ interface StorageRequest {
 
 interface StorageSpace {
   id?: string;
+  userId?: string;
   name: string;
   profileImage: string;
   neighborhood: string;
@@ -233,6 +234,11 @@ function App() {
 
   const openRatingModal = (spaceId: string) => {
     if (!user) { alert('Sign in to rate a space.'); return; }
+    const space = spaces.find(s => s.id === spaceId);
+    if (space?.userId && space.userId === user.id) {
+      alert("You can't rate your own space.");
+      return;
+    }
     setRatingSpaceId(spaceId);
     setRatingScore(0);
     setRatingHover(0);
@@ -280,6 +286,7 @@ function App() {
     const capacity = typeof items === 'string' ? (items ? (items as string).split(',').map((x: string) => x.trim()).filter(Boolean) : []) : (Array.isArray(s.capacity) ? s.capacity : []);
     return {
       id: (s.id as string) || undefined,
+      userId: (s.user_id as string) || (s.userId as string) || undefined,
       name: (s.name as string) || 'Host',
       profileImage: (s.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
       neighborhood: (s.neighborhood as string) || '',
