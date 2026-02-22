@@ -17,6 +17,7 @@ interface StorageRequest {
 }
 
 interface StorageSpace {
+  id?: string;
   userId?: string;
   name: string;
   profileImage: string;
@@ -29,6 +30,8 @@ interface StorageSpace {
   price?: number | null;
   marketAvg?: number;
   savings?: number | null;
+  avgRating?: number | null;
+  ratingCount?: number;
 }
 const FONT = "'DM Sans', system-ui, sans-serif";
 
@@ -253,6 +256,52 @@ function App() {
     price: "",
   });
 
+  // --- Rating modal state ---
+  const [ratingSpaceId, setRatingSpaceId] = useState<string | null>(null);
+  const [ratingScore, setRatingScore] = useState(0);
+  const [ratingHover, setRatingHover] = useState(0);
+  const [ratingComment, setRatingComment] = useState('');
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+
+  const openRatingModal = (spaceId: string) => {
+    if (!user) { alert('Sign in to rate a space.'); return; }
+    const space = spaces.find(s => s.id === spaceId);
+    if (space?.userId && space.userId === user.id) {
+      alert("You can't rate your own space.");
+      return;
+    }
+    setRatingSpaceId(spaceId);
+    setRatingScore(0);
+    setRatingHover(0);
+    setRatingComment('');
+  };
+
+  const submitRating = async () => {
+    if (!user || !ratingSpaceId || ratingScore < 1) return;
+    setRatingSubmitting(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/ratings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ space_id: ratingSpaceId, reviewer_id: user.id, score: ratingScore, comment: ratingComment }),
+      });
+      if (!res.ok) {
+        const { data, error } = await supabase.from('ratings').upsert({
+          space_id: ratingSpaceId, reviewer_id: user.id, score: ratingScore, comment: ratingComment,
+        }, { onConflict: 'space_id,reviewer_id' }).select().single();
+        if (error) throw error;
+        if (!data) throw new Error('No data returned');
+      }
+      setRatingSpaceId(null);
+      loadData();
+    } catch (err) {
+      console.error('Rating failed:', err);
+      alert(err instanceof Error ? err.message : 'Failed to submit rating.');
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
+
   const uploadAvatar = async (file: File, userId: string): Promise<string> => {
     const ext = file.name.split('.').pop();
     const path = `${userId}/${Date.now()}.${ext}`;
@@ -328,7 +377,8 @@ function App() {
     const items = s.items;
     const capacity = typeof items === 'string' ? (items ? (items as string).split(',').map((x: string) => x.trim()).filter(Boolean) : []) : (Array.isArray(s.capacity) ? s.capacity : []);
     return {
-      userId: (s.user_id as string) || undefined,
+      id: (s.id as string) || undefined,
+      userId: (s.user_id as string) || (s.userId as string) || undefined,
       name: (s.name as string) || 'Host',
       profileImage: (s.profile_image as string) || 'https://i.pravatar.cc/150?img=11',
       neighborhood: (s.neighborhood as string) || '',
@@ -338,6 +388,8 @@ function App() {
       timeframe: (s.timeframe as string) || '',
       description: (s.description as string) || '',
       price: s.price != null ? Number(s.price) : null,
+      avgRating: s.avgRating != null ? Number(s.avgRating) : null,
+      ratingCount: s.ratingCount != null ? Number(s.ratingCount) : 0,
     };
   };
 
@@ -806,7 +858,7 @@ function App() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
               {spaces.map((space, index) => (
-                <StorageSpaceCard key={index} {...space} onContact={handleContact} />
+                <StorageSpaceCard key={space.id || index} {...space} onRate={openRatingModal} onContact={handleContact} />
               ))}
               </div>
             </>
@@ -1004,6 +1056,91 @@ function App() {
           </div>
         </div>
       )}
+      {/* Rating Modal */}
+      {ratingSpaceId && (
+        <div
+          onClick={() => setRatingSpaceId(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '20px',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: '20px', padding: '32px',
+              width: '100%', maxWidth: '380px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <h2 style={{ fontWeight: '800', fontSize: '20px', color: '#111827', fontFamily: FONT, margin: 0 }}>Rate This Space</h2>
+              <button onClick={() => setRatingSpaceId(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: '#9ca3af' }}>
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginBottom: '20px' }}>
+              {[1, 2, 3, 4, 5].map(star => (
+                <span
+                  key={star}
+                  onClick={() => setRatingScore(star)}
+                  onMouseEnter={() => setRatingHover(star)}
+                  onMouseLeave={() => setRatingHover(0)}
+                  style={{
+                    fontSize: '36px',
+                    cursor: 'pointer',
+                    color: star <= (ratingHover || ratingScore) ? '#f59e0b' : '#d1d5db',
+                    transition: 'color 0.1s ease, transform 0.1s ease',
+                    transform: star <= (ratingHover || ratingScore) ? 'scale(1.15)' : 'scale(1)',
+                  }}
+                >
+                  &#9733;
+                </span>
+              ))}
+            </div>
+            {ratingScore > 0 && (
+              <p style={{ textAlign: 'center', fontSize: '14px', color: '#374151', fontFamily: FONT, marginBottom: '16px' }}>
+                {ratingScore === 1 && 'Poor'}
+                {ratingScore === 2 && 'Fair'}
+                {ratingScore === 3 && 'Good'}
+                {ratingScore === 4 && 'Very Good'}
+                {ratingScore === 5 && 'Excellent'}
+              </p>
+            )}
+
+            <textarea
+              placeholder="Leave a comment (optional)..."
+              value={ratingComment}
+              onChange={e => setRatingComment(e.target.value)}
+              rows={3}
+              style={{
+                width: '100%', padding: '12px 14px', borderRadius: '10px',
+                border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT,
+                color: '#111827', outline: 'none', resize: 'vertical', marginBottom: '16px',
+                boxSizing: 'border-box',
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = '#f59e0b')}
+              onBlur={e => (e.currentTarget.style.borderColor = '#e5e7eb')}
+            />
+
+            <button
+              disabled={ratingScore < 1 || ratingSubmitting}
+              onClick={submitRating}
+              style={{
+                width: '100%',
+                background: ratingScore < 1 ? '#d1d5db' : ratingSubmitting ? '#9ca3af' : '#f59e0b',
+                color: '#fff', border: 'none', borderRadius: '12px',
+                padding: '14px', fontSize: '15px', fontWeight: '700',
+                cursor: ratingScore < 1 || ratingSubmitting ? 'not-allowed' : 'pointer',
+                fontFamily: FONT, transition: 'background 0.15s ease',
+              }}
+            >
+              {ratingSubmitting ? 'Submitting...' : 'Submit Rating'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Onboarding Modal */}
       {showOnboarding && user && (
@@ -1022,7 +1159,6 @@ function App() {
               Add a photo and contact info so other students can reach you.
             </p>
 
-            {/* Avatar upload */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '24px' }}>
               <div
                 onClick={() => avatarInputRef.current?.click()}
@@ -1051,7 +1187,6 @@ function App() {
               </div>
             </div>
 
-            {/* Phone */}
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
                 Phone Number
@@ -1068,7 +1203,6 @@ function App() {
               />
             </div>
 
-            {/* Name (pre-filled from signup) */}
             <div style={{ marginBottom: '24px' }}>
               <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>
                 Display Name
@@ -1125,7 +1259,6 @@ function App() {
               ✕
             </button>
 
-            {/* Avatar */}
             <div style={{
               width: '88px', height: '88px', borderRadius: '50%', margin: '0 auto 16px',
               overflow: 'hidden', border: '3px solid #f3f4f6', background: '#f9fafb',
@@ -1144,7 +1277,6 @@ function App() {
               {contactPopup.name}
             </h3>
 
-            {/* Contact rows */}
             <div style={{ textAlign: 'left' }}>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',

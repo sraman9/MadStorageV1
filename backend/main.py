@@ -103,6 +103,12 @@ class StorageListing(BaseModel):
     
 
 
+class RatingCreate(BaseModel):
+    space_id: str
+    reviewer_id: str
+    score: int  # 1–5
+    comment: Optional[str] = ""
+
 class ScraperData(BaseModel):
     unit_size: str
     monthly_rate: float
@@ -133,7 +139,22 @@ def _request_to_card(item: dict) -> dict:
         "description": item.get("description", ""),
     }
 
-def _listing_to_card(item: dict) -> dict:
+def _get_rating_stats(sb: Client | None) -> dict[str, dict]:
+    """Fetch all ratings and compute avg + count per space_id."""
+    if not sb:
+        return {}
+    resp = sb.table("ratings").select("space_id,score").execute()
+    by_space: dict[str, list[int]] = {}
+    for r in (resp.data or []):
+        sid = r["space_id"]
+        by_space.setdefault(sid, []).append(r["score"])
+    return {
+        sid: {"avg": round(sum(scores) / len(scores), 1), "count": len(scores)}
+        for sid, scores in by_space.items()
+    }
+
+
+def _listing_to_card(item: dict, rating_stats: dict | None = None) -> dict:
     """Transform backend/Supabase listing format to card format. Includes savings vs market rates."""
     items_str = item.get("items", "")
     capacity = [x.strip() for x in items_str.split(",") if x.strip()] if items_str else item.get("capacity", [])
@@ -153,7 +174,10 @@ def _listing_to_card(item: dict) -> dict:
     except (TypeError, ValueError):
         price = 0.0
     savings = round(market_avg - price, 2) if price > 0 else None
+    space_id = item.get("id", "")
+    rs = (rating_stats or {}).get(space_id, {})
     card = {
+        "id": space_id,
         "userId": item.get("user_id", ""),
         "name": item.get("name") or item.get("host_name", "Host"),
         "profileImage": item.get("profileImage") or item.get("profile_image", "https://i.pravatar.cc/150?img=11"),
@@ -166,6 +190,8 @@ def _listing_to_card(item: dict) -> dict:
         "price": price if price > 0 else None,
         "marketAvg": round(market_avg, 2),
         "savings": savings if savings and savings > 0 else None,
+        "avgRating": rs.get("avg"),
+        "ratingCount": rs.get("count", 0),
     }
     return card
 
@@ -184,8 +210,9 @@ def get_all_listings():
     sb = _get_supabase()
     if not sb:
         return []
+    rs = _get_rating_stats(sb)
     resp = sb.table("storage_spaces").select("*").execute()
-    return [_listing_to_card(s) for s in (resp.data or [])]
+    return [_listing_to_card(s, rs) for s in (resp.data or [])]
 
 @app.get("/api/spaces")
 def get_all_spaces():
@@ -193,8 +220,9 @@ def get_all_spaces():
     sb = _get_supabase()
     if not sb:
         return []
+    rs = _get_rating_stats(sb)
     resp = sb.table("storage_spaces").select("*").execute()
-    return [_listing_to_card(s) for s in (resp.data or [])]
+    return [_listing_to_card(s, rs) for s in (resp.data or [])]
 
 @app.post("/api/requests")
 def create_request(request: StorageRequest):
@@ -243,6 +271,38 @@ async def create_listing(data: StorageListing):
         raise HTTPException(status_code=500, detail="Failed to create space")
     return _listing_to_card(resp.data[0])
 
+
+
+@app.get("/api/ratings/{space_id}")
+def get_ratings(space_id: str):
+    """Get all ratings for a specific space."""
+    sb = _get_supabase()
+    if not sb:
+        return []
+    resp = sb.table("ratings").select("*").eq("space_id", space_id).order("created_at", desc=True).execute()
+    return resp.data or []
+
+@app.post("/api/ratings")
+def create_rating(rating: RatingCreate):
+    """Submit or update a rating for a space (upsert: one per user per space)."""
+    if rating.score < 1 or rating.score > 5:
+        raise HTTPException(status_code=422, detail="Score must be 1–5")
+    sb = _get_supabase()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Supabase not configured.")
+    space = sb.table("storage_spaces").select("user_id").eq("id", rating.space_id).single().execute()
+    if space.data and space.data.get("user_id") == rating.reviewer_id:
+        raise HTTPException(status_code=403, detail="You cannot rate your own space.")
+    row = {
+        "space_id": rating.space_id,
+        "reviewer_id": rating.reviewer_id,
+        "score": rating.score,
+        "comment": rating.comment or "",
+    }
+    resp = sb.table("ratings").upsert(row, on_conflict="space_id,reviewer_id").execute()
+    if not resp.data:
+        raise HTTPException(status_code=500, detail="Failed to save rating")
+    return resp.data[0]
 
 
 @app.post("/api/ingest-scraper")

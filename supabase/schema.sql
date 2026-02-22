@@ -32,9 +32,21 @@ create table if not exists storage_spaces (
   created_at timestamptz default now()
 );
 
+-- Ratings (1–5 stars on storage spaces)
+create table if not exists ratings (
+  id uuid default gen_random_uuid() primary key,
+  space_id uuid references storage_spaces(id) on delete cascade not null,
+  reviewer_id uuid references auth.users(id) on delete cascade not null,
+  score smallint not null check (score >= 1 and score <= 5),
+  comment text default '',
+  created_at timestamptz default now(),
+  unique(space_id, reviewer_id)  -- one rating per user per space
+);
+
 -- Row Level Security
 alter table storage_requests enable row level security;
 alter table storage_spaces enable row level security;
+alter table ratings enable row level security;
 
 -- Anyone can read
 create policy "Public read requests" on storage_requests for select using (true);
@@ -49,6 +61,12 @@ create policy "Auth update requests" on storage_requests for update using (auth.
 create policy "Auth update spaces" on storage_spaces for update using (auth.uid() = user_id);
 create policy "Auth delete requests" on storage_requests for delete using (auth.uid() = user_id);
 create policy "Auth delete spaces" on storage_spaces for delete using (auth.uid() = user_id);
+
+-- Ratings: anyone can read, auth users can insert/update their own
+create policy "Public read ratings" on ratings for select using (true);
+create policy "Auth insert ratings" on ratings for insert with check (auth.uid() = reviewer_id);
+create policy "Auth update ratings" on ratings for update using (auth.uid() = reviewer_id);
+create policy "Auth delete ratings" on ratings for delete using (auth.uid() = reviewer_id);
 
 -- User profiles (contact info + avatar)
 create table if not exists profiles (
