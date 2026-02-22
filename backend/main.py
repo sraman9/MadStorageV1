@@ -9,7 +9,7 @@ import os
 from supabase import create_client, Client
 
 # Load .env from backend folder
-try:
+try:   
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parent / ".env")
 except ImportError:
@@ -129,6 +129,7 @@ def _request_to_card(item: dict) -> dict:
         if isinstance(items, str):
             items = [x.strip() for x in items.split(",") if x.strip()]
     return {
+        "userId": item.get("user_id", ""),
         "name": item.get("name", "Student"),
         "profileImage": item.get("profileImage") or item.get("profile_image", "https://i.pravatar.cc/150?img=11"),
         "neighborhood": item.get("neighborhood", ""),

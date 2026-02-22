@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 
 interface StorageSpaceCardProps {
   id?: string;
+  userId?: string;
   name: string;
   profileImage: string;
   neighborhood: string;
@@ -16,6 +17,7 @@ interface StorageSpaceCardProps {
   avgRating?: number | null;
   ratingCount?: number;
   onRate?: (spaceId: string) => void;
+  onContact?: (userId: string) => void;
 }
 
 const FONT = "'DM Sans', system-ui, sans-serif";
@@ -45,6 +47,7 @@ function StarDisplay({ rating, count }: { rating: number; count: number }) {
 
 const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
   id,
+  userId,
   name,
   profileImage,
   neighborhood,
@@ -59,6 +62,7 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
   avgRating,
   ratingCount = 0,
   onRate,
+  onContact,
 }) => {
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
@@ -302,6 +306,7 @@ const StorageSpaceCard: React.FC<StorageSpaceCardProps> = ({
         <button
           onMouseEnter={() => setBtnHovered(true)}
           onMouseLeave={() => setBtnHovered(false)}
+          onClick={() => userId && onContact?.(userId)}
           style={{
             width: '100%',
             background: btnHovered ? '#a0040a' : '#C5050C',

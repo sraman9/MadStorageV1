@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
 interface StorageRequestCardProps {
+  userId?: string;
   name: string;
   profileImage: string;
   neighborhood: string;
@@ -8,15 +9,18 @@ interface StorageRequestCardProps {
   budget: string;
   timeframe: string;
   description?: string;
+  onContact?: (userId: string) => void;
 }
 
 const StorageRequestCard: React.FC<StorageRequestCardProps> = ({
+  userId,
   name,
   profileImage,
   items,
   budget,
   timeframe,
   description,
+  onContact,
 }) => {
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
@@ -156,6 +160,7 @@ const StorageRequestCard: React.FC<StorageRequestCardProps> = ({
       <button
         onMouseEnter={() => setBtnHovered(true)}
         onMouseLeave={() => setBtnHovered(false)}
+        onClick={() => userId && onContact?.(userId)}
         style={{
           width: '100%',
           background: btnHovered ? '#a0040a' : '#C5050C',
