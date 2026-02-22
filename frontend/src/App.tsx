@@ -22,6 +22,9 @@ interface StorageSpace {
   capacity: string[];
   timeframe: string;
   description: string;
+  price?: number | null;
+  marketAvg?: number;
+  savings?: number | null;
 }
 const FONT = "'DM Sans', system-ui, sans-serif";
 
@@ -43,7 +46,8 @@ function App() {
     neighborhood: "",
     description: "",
     spaceType: "",
-    spaceImage: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64" // Default image
+    spaceImage: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64", // Default image
+    price: "",
   });
 
 // 2. FETCH: This pulls from your Python API when the app loads
@@ -74,7 +78,7 @@ const handleSubmit = async (e: React.FormEvent) => {
   const endpoint = modalType === 'request' ? 'requests' : 'spaces';
   const payload = modalType === 'request'
     ? { name: formData.name, profileImage: formData.profileImage, items: formData.items, budget: formData.budget, timeframe: formData.timeframe, neighborhood: formData.neighborhood, description: formData.description }
-    : { name: formData.name, profileImage: formData.profileImage, neighborhood: formData.neighborhood, spaceImage: formData.spaceImage, spaceType: formData.spaceType, items: formData.items, timeframe: formData.timeframe, description: formData.description };
+    : { name: formData.name, profileImage: formData.profileImage, neighborhood: formData.neighborhood, spaceImage: formData.spaceImage, spaceType: formData.spaceType, items: formData.items, timeframe: formData.timeframe, description: formData.description, price: formData.price ? parseFloat(formData.price) : null };
 
   try {
     const response = await fetch(`http://127.0.0.1:8000/api/${endpoint}`, {
@@ -325,9 +329,25 @@ const handleSubmit = async (e: React.FormEvent) => {
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>What can it fit?</label>
                   <input 
-                    value={formData.items} // Add this
-                    onChange={(e) => setFormData({ ...formData, items: e.target.value })} // Add this
-                    placeholder="e.g., 5-6 boxes, 1 mini fridge, 1 bike" 
+                    value={formData.items}
+                    onChange={(e) => setFormData({ ...formData, items: e.target.value })}
+                    placeholder="e.g., 5-6 boxes, 1 mini fridge, 1 bike (or 5x5, 10x10 for savings)" 
+                    style={{
+                      width: '100%', padding: '12px 14px', borderRadius: '10px',
+                      border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', fontWeight: '600', fontSize: '14px', color: '#111827', marginBottom: '8px', fontFamily: FONT }}>Monthly rate ($)</label>
+                  <input 
+                    type="number"
+                    min="0"
+                    step="5"
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    placeholder="e.g., 45" 
                     style={{
                       width: '100%', padding: '12px 14px', borderRadius: '10px',
                       border: '1.5px solid #e5e7eb', fontSize: '14px', fontFamily: FONT, color: '#111827', outline: 'none',
